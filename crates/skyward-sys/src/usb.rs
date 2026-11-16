@@ -3,7 +3,7 @@
 //! beside it while file transfer is on.
 
 use crate::{prop, set_prop, wait_prop};
-use anyhow::{ensure, Result};
+use anyhow::{anyhow, ensure, Result};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -44,6 +44,19 @@ pub fn set(config: &str, timeout: Duration) -> Result<()> {
 /// serving it and takes every function off; init then sets the port up
 /// once the programs behind the new configuration are ready.
 pub fn switch(config: &str, timeout: Duration) -> Result<()> {
+    let before = prop("sys.usb.state").filter(|state| !state.is_empty() && state != "none");
     set("none", timeout)?;
-    set(config, timeout)
+    match set(config, timeout) {
+        Ok(()) => Ok(()),
+        // A configuration init cannot bring up must not leave the port with
+        // none at all, or the phone has no port left to be reached on.
+        Err(e) => {
+            if let Some(before) = before
+                && let Err(back) = set(&before, timeout)
+            {
+                return Err(anyhow!("{e:#}; and the port did not come back as {before}: {back:#}"));
+            }
+            Err(e)
+        }
+    }
 }
