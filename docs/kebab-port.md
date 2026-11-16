@@ -412,11 +412,48 @@ AW8697 暴露 `/sys/class/leds/vibrator`（`duration` + `activate`），而 `sky
 
 kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。需要重新设计「第二个系统的 first-stage 放在哪」，工作量大，暂不处理。
 
+### 8.6 AVB：未签名 footer 与验证模式（2026-11-17 补充）
+
+现象：
+
+- 刷入打包出的镜像后，bootloader 报
+  `The current image (boot/recovery) have been destroyed`
+- `fastboot boot` 同样的镜像报
+  `Failed to load/authenticate boot image: Load Error`
+- 此时 `fastboot oem device-info` 显示 `Verity mode: true`
+- 换回 stock `recovery.img` 可以启动；刷 ROM 的 `vbmeta.img` + `dtbo.img` 后可恢复系统
+
+原因：
+
+`skyward-pack` 写的是 `avb.rs` 里 `--algorithm NONE` 的**未签名 vbmeta footer**。
+当 bootloader 的验证处于开启状态时，它无法认证这种镜像；而 stock Lineage recovery 是
+签名镜像（SHA256_RSA4096），所以同样的状态下它仍能启动。
+
+注意：`fastboot boot` 并不是「永远不校验」——验证状态打开后，它同样会拒绝未签名镜像。
+排查时不要把它当作「镜像一定没问题」的证据。
+
+处置：
+
+1. 按 LineageOS 安装流程刷入禁用校验的 vbmeta：
+
+   ```bash
+   fastboot --disable-verity --disable-verification flash vbmeta vbmeta.img
+   fastboot flash recovery skyward-kebab.img
+   ```
+
+2. 出现 `image destroyed` 提示时，刷回 ROM 的 `vbmeta.img` 与 `dtbo.img` 即可恢复
+   （实测有效）。
+
+后续改进（可选）：
+
+- 给打包器加签名能力（用测试密钥对 vbmeta 签名），使镜像在验证开启时也能被解析；
+- 或让打包器同时产出「禁用校验」的 vbmeta，并写进安装说明。
+
 ## 9. 下一步
 
 优先级从高到低：
 
-1. **备份并刷入 recovery 分区**，验证 Wi-Fi 是否与 `fastboot boot` 有关
+1. **刷入前先确认 `Verity mode` 与 vbmeta 状态**（见 §8.6）；未签名镜像只在禁用校验时可启动
 2. 若仍不通：给 cnss2 打开调试能力（需要可用的 debugfs 挂载点），或在 ramdisk 里预留 `/sys/kernel/debug`；同时对比 wifi HAL 打开 `/dev/wlan` 后驱动行为
 3. 复测 MTP（重新打开 File transfer）
 4. 增加 Keymaster 4.x HIDL 客户端（解密）
