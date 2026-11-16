@@ -74,6 +74,22 @@ fn padding(len: usize, page: usize) -> usize {
     (page - (len % page)) % page
 }
 
+/// The digest a version 0 through 2 header keeps of its sections, as
+/// mkbootimg makes it: SHA-1 over each section and its size in bytes, in
+/// the order the header lays them out, with the rest of the field zero.
+/// A bootloader may check it against the sections a flashed image holds.
+fn legacy_id(sections: [&[u8]; 5]) -> Result<[u8; 32]> {
+    use sha1::{Digest, Sha1};
+    let mut sha = Sha1::new();
+    for section in sections {
+        sha.update(section);
+        sha.update(u32::try_from(section.len()).context("a section's size")?.to_le_bytes());
+    }
+    let mut id = [0u8; 32];
+    id[..20].copy_from_slice(&sha.finalize());
+    Ok(id)
+}
+
 fn section(bytes: &[u8], at: usize, len: u32, what: &str) -> Result<Vec<u8>> {
     let end = at.checked_add(len as usize).ok_or_else(|| anyhow!("{what} runs past the end of the image"))?;
     bytes.get(at..end).map(<[u8]>::to_vec).ok_or_else(|| anyhow!("{what} runs past the end of the image"))
@@ -125,6 +141,9 @@ impl BootImage {
                         *dtb_size = u32::try_from(self.dtb.len()).context("DTB size")?;
                     }
                 }
+                // The image's sections are not the stock ones any more, so
+                // the digest a bootloader may check them by is made again.
+                h.hash_digest = legacy_id([&self.kernel, &self.ramdisk, &self.second, &self.recovery_dtbo, &self.dtb])?;
             }
             Header::V3(h) => {
                 h.kernel_size = u32::try_from(self.kernel.len()).context("kernel size")?;
@@ -200,7 +219,7 @@ mod tests {
         let mut cmdline = [0u8; 512];
         cmdline[..8].copy_from_slice(b"test=one");
         header.extend_from_slice(&cmdline);
-        header.extend_from_slice(&[0; 32]); // hash digest
+        header.extend_from_slice(&legacy_id(kernel, ramdisk, second, dtbo, dtb));
         header.extend_from_slice(&[0; 1024]); // extra command line
         if version >= 1 {
             u32le!(dtbo.len() as u32);
@@ -289,6 +308,34 @@ mod tests {
         assert_eq!(img.header.header_version(), 3);
         assert_eq!((img.kernel.as_slice(), img.ramdisk.as_slice()), (b"kern".as_slice(), b"ramdisk".as_slice()));
         assert_eq!(img.to_bytes().unwrap(), bytes);
+    }
+
+    /// The digest a version 0 through 2 header keeps, made the way
+    /// mkbootimg makes it, to check what the image writes against it.
+    fn legacy_id(kernel: &[u8], ramdisk: &[u8], second: &[u8], dtbo: &[u8], dtb: &[u8]) -> [u8; 32] {
+        use sha1::{Digest, Sha1};
+        let mut sha = Sha1::new();
+        for part in [kernel, ramdisk, second, dtbo, dtb] {
+            sha.update(part);
+            sha.update(u32::to_le_bytes(u32::try_from(part.len()).unwrap()));
+        }
+        let mut id = [0u8; 32];
+        id[..20].copy_from_slice(&sha.finalize());
+        id
+    }
+
+    #[test]
+    fn a_version_two_image_makes_the_digest_of_its_sections_again() {
+        let bytes = image(2, 4096, b"kernel", b"ramdisk", &[], b"dtbo", b"dtb");
+        let mut img = BootImage::parse(&bytes).unwrap();
+        img.ramdisk = b"a longer ramdisk than before".to_vec();
+        let made = img.to_bytes().unwrap();
+        let back = BootImage::parse(&made).unwrap();
+        let id = match back.header {
+            Header::V0(h) => h.hash_digest,
+            Header::V3(_) => unreachable!(),
+        };
+        assert_eq!(id, legacy_id(b"kernel", b"a longer ramdisk than before", &[], b"dtbo", b"dtb"));
     }
 
     #[test]

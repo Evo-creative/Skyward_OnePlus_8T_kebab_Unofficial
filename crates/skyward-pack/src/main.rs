@@ -68,6 +68,10 @@ enum Cmd {
         /// The monospaced typeface's licence, which goes with it.
         #[arg(long)]
         mono_license: PathBuf,
+        /// The partition's size in bytes, where it is larger than the stock
+        /// image and the phone's bootloader wants the footer at its end.
+        #[arg(long)]
+        size: Option<u64>,
         #[arg(long)]
         out: PathBuf,
     },
@@ -125,8 +129,16 @@ fn main() -> Result<()> {
             img.kernel = BootImage::read(&kernel)?.kernel;
             write(&out, &img, &img.to_bytes()?)
         }
-        Cmd::Recovery { stock, binary, system_init, config, font, mono, mono_license, out } => {
-            let size = partition_size(&stock)?;
+        Cmd::Recovery { stock, binary, system_init, config, font, mono, mono_license, size, out } => {
+            let size = match size {
+                Some(size) => usize::try_from(size).context("partition size")?,
+                None => partition_size(&stock)?,
+            };
+            ensure!(
+                size >= partition_size(&stock)?,
+                "a {size}-byte partition is smaller than the {} bytes the stock image fills",
+                partition_size(&stock)?
+            );
             let mut img = BootImage::read(&stock)?;
             let mut rd = Ramdisk::decode(&img.ramdisk)?;
             // A stock recovery ramdisk has no third-party tree; refuse to build
