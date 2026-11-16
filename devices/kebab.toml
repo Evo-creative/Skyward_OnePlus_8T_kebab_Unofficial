@@ -1,0 +1,62 @@
+[device]
+codename = "kebab"
+brand = "OnePlus"
+model = "OnePlus 8T"
+ab = true
+soc = { hans = "骁龙865", hant = "驍龍865", en = "Snapdragon 865" }
+
+[display]
+width = 1080
+height = 2400
+density = 450
+diagonal = 6.55
+corner_radius = 24
+
+# Every driver the recovery needs is built into the kernel this phone's
+# system installs, apart from gspca_main, so none is loaded here. The
+# phone has no vendor_boot and no vendor_dlkm partition; what modules it
+# keeps are under vendor.
+[modules]
+sources = ["vendor"]
+load = []
+
+# The persist partition, which the phone mounts at /mnt/vendor/persist and
+# its own recovery leaves unmounted. The WLAN chip keeps its firmware, its
+# settings and its address there, and the secure world keeps files its key
+# service reads.
+[partitions]
+mounted = ["persist"]
+
+# The modem partition holds the firmware the phone's drivers ask for, at
+# /vendor/firmware_mnt on the phone.
+[firmware]
+partition = "modem"
+
+# WLAN: the WCN6855/QCA6390 on PCIe, driven by the built-in qca_cld3_wlan
+# over the cnss2 platform driver. Once fs_ready is written, cnss2 powers
+# the chip up and wlan0 appears. The chip's settings and MAC address are
+# on the persist partition, which the driver reads there itself, and on the
+# odm partition's wifi folder.
+[wlan]
+modules = []
+writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
+interface = "wlan0"
+supplicant = "/vendor/bin/hw/wpa_supplicant"
+libraries = ["/vendor/lib64", "/system/lib64"]
+service = "android.hardware.wifi.supplicant.ISupplicant/default"
+probe = "http://connectivitycheck.gstatic.com/generate_204"
+
+# The partitions a backup of the baseband takes, and what of the data
+# partition a backup leaves out because the secure world keeps it in step
+# with itself.
+[backup]
+efs = ["modemst1", "modemst2", "fsg", "fsc", "persist"]
+data_skipped = ["vendor/tzstorage", "vendor/qtee", "vendor/fingerprint", "vendor/optical_fingerprint"]
+
+# Where the phone's own programs keep logs in the data partition.
+[wipe]
+logs = [
+    "/data/vendor/ramdump",
+    "/data/vendor/ssrdump",
+    "/data/vendor/tombstones",
+]
