@@ -21,9 +21,14 @@ pub const BY_NAME: &str = "/dev/block/by-name";
 /// matching `ro.boot.*` properties; these files come from the kernel.
 pub fn boot_param(key: &str) -> Result<Option<String>> {
     for src in ["/proc/bootconfig", "/proc/cmdline"] {
-        match fs::read_to_string(src) {
-            Ok(s) => {
-                if let Some(v) = find_kv(&s, key) {
+        match fs::read(src) {
+            // A bootloader may put bytes that are not UTF-8 in the command
+            // line, as the OnePlus 8T's does after its own keys' digest;
+            // the parameters are ASCII, and what is not is left as
+            // replacement characters that no key matches.
+            Ok(bytes) => {
+                let text = String::from_utf8_lossy(&bytes);
+                if let Some(v) = find_kv(&text, key) {
                     return Ok(Some(v));
                 }
             }

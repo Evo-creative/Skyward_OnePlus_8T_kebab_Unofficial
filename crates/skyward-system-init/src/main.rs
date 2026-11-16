@@ -274,9 +274,11 @@ mod sys {
     /// them, leaving out those `skip` names. Where one does not load, the
     /// rest still do, and the error names those not loaded.
     fn modules(skip: &[String]) -> Result<()> {
-        let cmdline = fs::read_to_string("/proc/cmdline").context("read /proc/cmdline")?;
-        let bootconfig = match fs::read_to_string("/proc/bootconfig") {
-            Ok(text) => text,
+        // A bootloader may put bytes that are not UTF-8 in the command line;
+        // the module settings in it are ASCII, and the rest is of no use.
+        let cmdline = String::from_utf8_lossy(&fs::read("/proc/cmdline").context("read /proc/cmdline")?).into_owned();
+        let bootconfig = match fs::read("/proc/bootconfig") {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(e) => return Err(e).context("read /proc/bootconfig"),
         };
