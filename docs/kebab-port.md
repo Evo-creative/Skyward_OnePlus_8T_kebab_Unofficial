@@ -1,0 +1,437 @@
+# Skyward 移植到 OnePlus 8T（kebab）记录
+
+日期：2026-11-17
+基线：Skyward v0.3.1（`crates/` 工作区），LineageOS 24.0 的 `recovery.img`
+
+## 1. 现状摘要
+
+| 能力 | 状态 | 说明 |
+|---|---|---|
+| 启动（recovery 分区镜像） | ✅ | `fastboot boot` 与打包流程均已验证 |
+| UI | ✅ | 正常显示，英文界面 |
+| 120Hz 高刷 | ✅ | DRM 暴露 60/120 两个模式，UI 启动后切到 120 |
+| 触摸 | ✅ | Synaptics S3908，evdev `input2` |
+| 分区识别 / super 挂载 | ✅ | odm/product/system/system_ext/vendor 全部挂上 |
+| persist / modem 挂载 | ✅ | `/mnt/vendor/persist`、`/vendor/firmware_mnt` |
+| 背光 | ✅ | `panel0-backlight`，max 2047 |
+| adb（root shell） | ✅ | 需 File transfer 关闭，见 §8.2 |
+| MTP | ⚠️ | 修复代码已提交，未复测 |
+| Wi-Fi | ❌ | 固件加载成功，芯片不进入 FW ready，见 §8.1 |
+| Data 解密 | ❌ | 本机只有 Keymaster 4.x HIDL，见 §8.3 |
+| 振动 | ❌ | AW8697 是 LED 接口，非 evdev FF，见 §8.4 |
+| 双系统 | ⛔ | 本机无 `init_boot` 分区，现有实现不可用 |
+
+## 2. Skyward 的工作方式（与本机相关部分）
+
+```
+bootloader
+ └─ recovery 分区里的内核（原厂/ROM 构建，Skyward 不改）
+     └─ ramdisk 里的 AOSP init
+         └─ /system/bin/recovery = Skyward
+             ├─ prepare(): 从 super 映射并挂载 system/vendor/odm...
+             ├─ 读已安装系统的 init.rc / vintf，决定拉起哪些 HAL
+             ├─ 挂载 persist、modem 固件分区
+             ├─ 加载内核模块（可配）
+             └─ ui::run(): DRM/KMS 绘制 + evdev 输入 + MTP/fastboot
+```
+
+要点：
+
+- 打包器把 Skyward 二进制**替换** ramdisk 里的 `system/bin/recovery`，其余（init/adbd/SELinux/库）保持不变。
+- 设备用户态驱动来自**已安装系统**的 `/vendor`、`/odm`；因此 recovery 内核版本必须与已安装系统一致。
+- 设备差异全部收敛在 `devices/<codename>.toml`，代码里只有少量通用逻辑需要补。
+
+## 3. 实机数据（OnePlus 8T / kebab）
+
+采集方式见 §10。
+
+```
+model            OnePlus 8T (KB2000), codename kebab
+系统             Android 17 / CP2A.260605.016（LineageOS 24）
+内核             4.19.325-cip136-st20-perf-g078365e5318d
+槽位             _a
+recovery_a/b     104,857,600 B (100 MiB)
+super            7,516,192,768 B (7 GiB)
+metadata/misc/persist/modem/modemst1/modemst2/fsg/fsc   均存在
+```
+
+### 3.1 显示
+
+```
+DRM modes        1080x2400x60x183357x0cmd
+                 1080x2400x120x183357x0cmd
+面板             samsung amb655x, dsi_cmd_mode, DSC ×2 encoder
+DT 背光          qcom,mdss-dsi-bl-normal-max-level = 0x7ff (2047)
+                 qcom,mdss-dsi-bl-max-level        = 0x7ff
+backlight        panel0-backlight, max_brightness = 2047
+```
+
+### 3.2 触摸
+
+```
+芯片             Synaptics S3908（oncell）
+驱动             oplus_touchscreen，CONFIG_TOUCHPANEL_OPLUS=y（内建）
+设备节点         /dev/input/input2 (touchpanel), input3 (kpd)
+上报率           60 / 90 / 120 均可
+```
+
+### 3.3 WLAN
+
+```
+芯片             QCA6390（qca6390 profile）
+驱动             qca_cld3_wlan 内建；cnss2 / QMI
+触发             /sys/kernel/cnss/fs_ready = 1
+固件             /vendor/firmware_mnt/image/qca6390/
+                 ├─ amss20.bin
+                 ├─ bdwlan.elf
+                 ├─ m3.bin
+                 └─ Data.msc
+运行配置         /vendor/firmware/wlan/qca_cld/{WCNSS_qcom_cfg.ini,wlan_mac.bin}
+persist          /mnt/vendor/persist/{bdwlan.elf,bdwlanu.elf,wlan_mac.bin,wlan/}
+supplicant       /vendor/bin/hw/wpa_supplicant（3.8 MB）
+AIDL 服务        android.hardware.wifi.supplicant.ISupplicant/default（已注册）
+```
+
+### 3.4 加密与安全
+
+```
+fileencryption        aes-256-xts:aes-256-cts:v2+inlinecrypt_optimized+wrappedkey_v0
+metadata_encryption   aes-256-xts:wrappedkey_v0
+keydirectory          /metadata/vold/metadata_encryption
+Keymaster             HIDL 4.0 / 4.1（IKeymasterDevice/default）
+Gatekeeper            HIDL 1.0（IGatekeeper/default）
+KeyMint AIDL          无
+Weaver                无
+```
+
+### 3.5 振动
+
+```
+接口             /sys/class/leds/vibrator/
+                 ├─ activate, duration, brightness, max_brightness
+                 ├─ rtp, waveform_index, gain, f0, ...
+                 └─ 无 evdev force-feedback
+```
+
+### 3.6 字体
+
+```
+MiSansVF.ttf          19.2 MB 原始 / 15.5 MB LZ4
+KirkMono-Regular.ttf  264 KB  / 142 KB
+```
+
+系统字体不可直接替换：手机自带 Roboto/RobotoFlex 无中文字形；NotoSansCJK 为 32 MB TTC 且 index 0 是日文 face；Ubuntu 的 DroidSansFallbackFull 没有拉丁字形（`A/z/0/9` glyph 均为 0）。
+
+## 4. 代码改动
+
+| 提交 | 内容 |
+|---|---|
+| `24512cf` | `skyward-bootimg` 支持 boot header v0–v4：保留 kernel/ramdisk/second/recovery_dtbo/dtb，按版本布局读写 |
+| `8cfe87d` | 新增 `devices/kebab.toml` |
+| `3304ddb` | `skyward-block::boot_param` 与 `system-init` 以字节读 `/proc/cmdline`：OnePlus bootloader 在 `avbkeysha256` 后追加非 UTF-8 字节 |
+| `af3ceb5` | 背光 normal-max 支持高通通用 DT 字段，找不到时回退到面板最大值 |
+| `e017082` | MTP：`mtp,adb` 触发不再依赖 `sys.usb.config_disable`；`usb::switch` 失败时回退到原配置 |
+
+### 4.1 为什么需要 boot header v2
+
+`crates/skyward-bootimg/src/image.rs` 原本只接受 v3/v4。本机 recovery 是 v2：
+
+```
+header_version   2
+page_size        4096
+kernel           56,918,040 B
+ramdisk          18,972,189 B（LZ4 legacy）
+second           0
+recovery_dtbo      884,736 B
+dtb              1,428,199 B
+```
+
+v2 布局多了 `recovery_dtbo` 与 `dtb`，只按 v3 重建会丢掉它们。
+
+### 4.2 kebab.toml 要点
+
+```toml
+[device]  codename = "kebab", brand = "OnePlus", model = "OnePlus 8T", ab = true
+[display] width = 1080, height = 2400, density = 450, diagonal = 6.55, corner_radius = 24
+[modules] sources = ["vendor"], load = []       # 无 vendor_boot/vendor_dlkm；驱动基本内建
+[partitions] mounted = ["persist"]
+[firmware] partition = "modem"
+[wlan] modules = [], writes = fs_ready = 1, interface = "wlan0",
+       supplicant = "/vendor/bin/hw/wpa_supplicant",
+       service = "android.hardware.wifi.supplicant.ISupplicant/default",
+       probe = "http://connectivitycheck.gstatic.com/generate_204"
+[backup] efs = [modemst1, modemst2, fsg, fsc, persist]
+```
+
+未配置 `[haptics]`（见 §8.4）。
+
+## 5. 构建与打包
+
+环境：
+
+```
+Rust        1.100.0（rust-toolchain.toml）
+target      aarch64-linux-android
+NDK         r29  (/home/evo/bin/android-ndk-r29)
+cargo-ndk   4.1.2
+外部工具    lz4、unzip、adb、fastboot
+```
+
+命令：
+
+```bash
+# 手机端
+cargo ndk -t arm64-v8a --platform 30 build --release -p skyward
+
+# 双系统 first-stage（静态）
+RUSTFLAGS="-C target-feature=+crt-static" cargo ndk -t arm64-v8a --platform 30 \
+  build --release -p skyward-system-init --target-dir target/system-init
+
+# 打包器
+cargo build --release -p skyward-pack
+
+# 出镜像
+target/release/skyward-pack recovery \
+  --stock cache/recovery.img \
+  --binary target/aarch64-linux-android/release/skyward \
+  --system-init target/system-init/aarch64-linux-android/release/system-init \
+  --config devices/kebab.toml \
+  --font resources/fonts/MiSansVF.ttf \
+  --mono resources/fonts/KirkMono-Regular.ttf \
+  --mono-license resources/fonts/KirkMono-OFL.txt \
+  --out skyward-kebab.img
+```
+
+### 5.1 体积预算（实测）
+
+| 组成 | MiB |
+|---|---|
+| kernel | 54.28 |
+| ramdisk（stock 18.09 + 新增 21.22） | 39.31 |
+| recovery_dtbo | 0.84 |
+| dtb | 1.36 |
+| header + vbmeta + footer | 0.01 |
+| **合计** | **95.81** |
+| stock 镜像大小 | 96.00 |
+| 实际分区 | 100.00 |
+
+余量约 4 MiB（stock 镜像本身只填了 96 MiB，分区是 100 MiB）。
+
+ramdisk 内新增：
+
+```
+system/bin/recovery                8,805,096 B   （Skyward）
+system/bin/{7za,avbctl,resetprop,unzip,zstd}    → recovery 的符号链接
+skyward/system-init                1,040,856 B
+skyward/device.toml
+skyward/MiSansVF.ttf               20,093,424 B
+skyward/KirkMono-Regular.ttf       270,456 B
+skyward/KirkMono-OFL.txt
+```
+
+### 5.2 stock 镜像
+
+`cache/recovery.img`（LineageOS 24.0）：
+
+- 96 MiB，末尾 `AVBf`
+- 内核版本字符串与手机 `uname -r` 完全一致
+- 与手机 `boot_a` 的内核 sha256 一致：`2e75d6f1…`
+- ramdisk 含 `init`、`prop.default`、`sepolicy`、`system/bin/{adbd,init,recovery,sh}`，无 TWRP 痕迹
+
+## 6. 实机验证记录
+
+### 6.1 启动日志（关键行）
+
+```
+skyward: kebab 0.3.1 recovery up, misc command "" ...
+skyward: mounted odm_a on /odm (erofs)
+skyward: mounted product_a on /product (ext4)
+skyward: mounted system_a on /mnt/system (ext4)
+skyward: mounted system_ext_a on /system_ext (ext4)
+skyward: mounted vendor_a on /vendor (erofs)
+skyward: 119 device nodes given the owner their phone describes
+skyward: modem is mounted on /vendor/firmware_mnt, shown at /firmware
+skyward: persist is mounted on /mnt/vendor/persist
+skyward: the service directory is told of 22 of the phone's own services
+skyward: devices not brought up: ... no ...keymint.IKeyMintDevice/default
+skyward: the pages speak En, with none chosen, and the locale named is en-US
+```
+
+### 6.2 面板
+
+```
+/sys/class/drm/card0-DSI-1/status  connected
+/sys/class/drm/card0-DSI-1/modes   1080x2400x60…, 1080x2400x120…
+backlight brightness               263
+```
+
+`skyward kms` 在 UI 运行时不可用（DRM master 被 UI 持有，atomic commit 返回 `Permission denied`），读 sysfs 即可。
+
+### 6.3 触摸
+
+```
+syna-tcm probe 成功；input2 touchpanel、input3 touchpanel_kpd
+fps_report_rate: 60 / 90 / 120
+```
+
+## 7. 当前镜像的启动方式
+
+```bash
+# 不写分区，最安全
+adb reboot bootloader
+fastboot boot /tmp/opencode/skyward-kebab.img
+```
+
+注意：`fastboot boot` 会让内核命令行带上 `androidboot.mode=fastboot`（与正常启动的 `androidboot.mode=reboot` 不同），见 §8.1。
+
+## 8. 已知问题
+
+### 8.1 Wi-Fi 不启动（主要未完成项）
+
+现象：
+
+```
+cnss: File system is ready, fs_ready is 1
+cnss: COLD_BOOT_CAL_START
+cnss: Setting MHI state: POWER_ON(2)
+cnss_pci ...: Falling back to syfs fallback for: qca6390/amss20.bin
+ueventd: loading ... took 18ms
+cnss: MHI status cb ... MISSION_MODE(6)
+（此后无进展；42 秒后）
+cnss: fatal: Timeout waiting for FW ready indication
+```
+
+对照 Android（正常启动）：
+
+```
+5.495  fs_ready
+5.545  Falling back amss20.bin
+5.698  MISSION_MODE
+8.373  FW_READY（第一次，校准）
+16.000 FW_READY（第二次）
+16.024  hif_pci_enable_bus → Target Ready → wlan0
+```
+
+已排除：
+
+| 假设 | 结论 |
+|---|---|
+| 固件文件不同 | 排除：md5 一致 `8cd9cb2d…` |
+| 内核不同 | 排除：与 `boot_a` 内核 sha256 一致 |
+| 固件找不到 | 排除：ueventd 成功加载 |
+| 时间太晚 | 排除：开机 10 秒写入结果相同 |
+| debugfs 缺失 | 未验证；recovery 无 `/sys/kernel/debug` 挂载点，`/sys` 只读 |
+
+剩余差异：
+
+1. `androidboot.mode=fastboot`（`fastboot boot`）
+2. `fastboot boot` 与正常启动的硬件初始化路径可能不同
+3. 某个正常系统里由 wifi HAL 完成的动作（例如打开 `/dev/wlan`）在 recovery 中缺失
+
+建议的决定性实验：**备份 `recovery_a` 后真正刷入该镜像，再启动测试**。若成功，说明与 `fastboot boot` 的启动路径有关，正式交付不受影响。
+
+### 8.2 MTP 导致 USB 端口消失
+
+根因：
+
+- UI 默认开启 File transfer（`skyward-ui/src/app/state.rs` `file_transfer: true`）
+- `usb::switch("mtp,adb")` 先切到 `none`（停 adbd、解绑 UDC）
+- 注入的 `skyward-mtp.rc` 里启动 adbd 的规则带 `sys.usb.config_disable=0`，而 recovery 从不设置该属性 → 规则不触发 → 状态停在 `none` → USB 完全不枚举
+- 日志：`the port did not take file transfer: sys.usb.state is Some("none") after 5000 ms, not "mtp,adb"`
+
+已修（`e017082`）：
+
+- 去掉 `sys.usb.config_disable` 条件
+- `switch` 失败时回退到原配置
+- 关闭 File transfer 可恢复 adb（已验证：`18d1:d001` → adb 正常）
+
+待验证：重新打开 File transfer 后 MTP 是否工作。
+
+### 8.3 Data 解密不可用
+
+本机只有 Keymaster HIDL 4.0/4.1，没有 KeyMint AIDL。`skyward-crypto/src/keymint.rs` 只实现了 AIDL 客户端。
+
+已有的基础：
+
+- `metadata_encryption=aes-256-xts:wrappedkey_v0` 与 `keydirectory=/metadata/vold/metadata_encryption` 都在 Skyward 支持范围
+- `crypto/keystore.rs` 已能解析 `keymaster_key_blob`
+- HIDL 客户端基础设施已有（gatekeeper 用 HIDL 1.0）
+
+需要：新增 Keymaster 4.x HIDL 客户端（getHardwareFeatures / unwrap 等），接入现有 blob 解析与 dm-default-key 流程。
+
+### 8.4 振动
+
+AW8697 暴露 `/sys/class/leds/vibrator`（`duration` + `activate`），而 `skyward/src/haptics.rs` 走 evdev force-feedback。当前 `devices/kebab.toml` 不配置 `[haptics]`，功能不受影响，只是没有震动反馈。
+
+需要：增加 LED-class 后端（几十行），或保持不配置。
+
+### 8.5 双系统
+
+`skyward-systems` 硬依赖 `init_boot` 分区：
+
+- `install.rs` 无条件读 `boot` 与 `init_boot` 的大小
+- `boot.rs` 要求模板镜像 kernel 为空
+- `switch.rs` 依赖 `init_boot`
+
+kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。需要重新设计「第二个系统的 first-stage 放在哪」，工作量大，暂不处理。
+
+## 9. 下一步
+
+优先级从高到低：
+
+1. **备份并刷入 recovery 分区**，验证 Wi-Fi 是否与 `fastboot boot` 有关
+2. 若仍不通：给 cnss2 打开调试能力（需要可用的 debugfs 挂载点），或在 ramdisk 里预留 `/sys/kernel/debug`；同时对比 wifi HAL 打开 `/dev/wlan` 后驱动行为
+3. 复测 MTP（重新打开 File transfer）
+4. 增加 Keymaster 4.x HIDL 客户端（解密）
+5. 增加 LED 振动后端（可选）
+6. 字体子集化（可选，省约 10 MiB）
+
+安全事项：
+
+- 首次刷写前务必备份 `recovery_a`
+- 不要锁定 bootloader
+- 测试期间不要使用 Install / Wipe / Flash Skyward again
+
+## 10. 附录
+
+### 10.1 实机信息采集命令
+
+```bash
+adb root
+adb shell ls -l /dev/block/by-name
+adb shell 'cat /sys/class/block/sda16/size'        # recovery_a 扇区数
+adb shell getprop ro.build.display.id
+adb shell uname -r
+adb shell cat /sys/class/drm/card0-DSI-1/modes
+adb shell cat /sys/class/backlight/panel0-backlight/max_brightness
+adb shell ls /sys/class/leds/vibrator
+adb shell ls /vendor/lib/modules
+adb shell ls /vendor/firmware_mnt/image/qca6390
+adb shell ls /vendor/firmware/wlan/qca_cld
+adb shell ls /mnt/vendor/persist
+adb shell grep -E 'userdata|metadata' /vendor/etc/fstab.qcom
+adb shell lshal | grep -iE 'keymint|keymaster|gatekeeper|weaver'
+adb shell service list | grep -i supplicant
+```
+
+### 10.2 日志摘录（recovery）
+
+```
+[    0.771] [TP]syna-tcm: syna_tcm_probe: enter
+[    0.872] input: touchpanel as /devices/virtual/input/input2
+[    1.192] [drm:dsi_display_bind] Successfully bind display panel
+           'qcom,mdss_dsi_oplus20828samsung_amb655x_1080_2400_cmd'
+[    2.032] [drm:dsi_panel_get_mode] default topology: lm: 2 comp_enc:2 intf: 1
+[    2.815] skyward: kebab 0.3.1 recovery up, misc command "bootonce-bootloader"
+...
+[    9.901] cnss: Posting event: COLD_BOOT_CAL_START(5)
+[    9.963] cnss_pci: Falling back to syfs fallback for: qca6390/amss20.bin
+[   10.137] cnss: MHI status cb is called with reason MISSION_MODE(6)
+```
+
+### 10.3 参考
+
+- Skyward 仓库：https://github.com/kirklin/skyward
+- LineageOS kebab 安装：https://wiki.lineageos.org/devices/kebab/install
+- TWRP kebab：https://twrp.me/oneplus/oneplus8t.html
+- Android boot image header：https://source.android.com/docs/core/architecture/bootloader/boot-image-header
