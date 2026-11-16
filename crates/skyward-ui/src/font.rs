@@ -318,4 +318,16 @@ mod tests {
         assert!((ink_bottom - ink_top - 47.0).abs() <= 2.0, "ink {ink_top}..{ink_bottom}");
         assert!((bottom - top - 69.0).abs() <= 2.0, "line {top}..{bottom}");
     }
+
+    /// The typeface a port that cuts the font for size builds on: every
+    /// weight is still there, and both Chinese scripts still draw.
+    #[test]
+    fn the_subset_typeface_keeps_its_weights_and_draws_both_scripts() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources/fonts");
+        let f = Fonts::load(format!("{dir}/MiSans-Subset.ttf"), 0, format!("{dir}/KirkMono-Regular.ttf")).unwrap();
+        assert!(f.axes().iter().any(|(tag, ..)| tag == "wght"), "the weight axis is kept");
+        for ch in "简体中文繁體中文English0123456789".chars() {
+            assert!(f.body.has(ch), "the subset draws {ch:?}");
+        }
+    }
 }

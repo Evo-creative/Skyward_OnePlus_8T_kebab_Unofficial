@@ -15,6 +15,7 @@
 | persist / modem 挂载 | ✅ | `/mnt/vendor/persist`、`/vendor/firmware_mnt` |
 | 背光 | ✅ | `panel0-backlight`，max 2047 |
 | adb（root shell） | ✅ | 需 File transfer 关闭，见 §8.2 |
+| 字体 | ✅ | 子集化 MiSans，ramdisk 39.3 → 27.2 MiB，见 §3.6 |
 | MTP | ⚠️ | 修复代码已提交，未复测 |
 | Wi-Fi | ❌ | 固件加载成功，芯片不进入 FW ready，见 §8.1 |
 | Data 解密 | ❌ | 本机只有 Keymaster 4.x HIDL，见 §8.3 |
@@ -116,11 +117,36 @@ Weaver                无
 ### 3.6 字体
 
 ```
-MiSansVF.ttf          19.2 MB 原始 / 15.5 MB LZ4
-KirkMono-Regular.ttf  264 KB  / 142 KB
+MiSansVF.ttf          19.2 MB 原始 / 15.5 MB LZ4   （完整字体）
+MiSans-Subset.ttf      5.68 MB 原始 / 4.64 MB LZ4  （kebab 用）
+KirkMono-Regular.ttf   264 KB / 142 KB
 ```
 
-系统字体不可直接替换：手机自带 Roboto/RobotoFlex 无中文字形；NotoSansCJK 为 32 MB TTC 且 index 0 是日文 face；Ubuntu 的 DroidSansFallbackFull 没有拉丁字形（`A/z/0/9` glyph 均为 0）。
+系统字体不可直接替换：
+
+- 手机自带 Roboto / RobotoFlex 无中文字形
+- NotoSansCJK 是 32 MB 的 TTC，且 index 0 是日文 face（运行时只读 index 0）
+- Ubuntu 的 DroidSansFallbackFull 没有拉丁字形（`A/z/0/9` glyph 均为 0）
+
+因此对 MiSans 做子集化：保留 UI 全部字符 + GB2312（6763 汉字）+ Big5 一级常用（5401）+ 拉丁/标点/符号，共 10,514 个字符。
+
+结果：字形 29,773 → 10,018，`wght` 轴（150–700）保留，UI 892 个字符无缺失。
+
+重新生成：
+
+```bash
+./venv/bin/pyftsubset resources/fonts/MiSansVF.ttf \
+  --text-file=/tmp/opencode/subset-chars.txt \
+  --output-file=resources/fonts/MiSans-Subset.ttf \
+  --layout-features='*' --name-IDs='*' --name-legacy \
+  --notdef-glyph --notdef-outline --recommended-glyphs \
+  --glyph-names=no --symbol-cmap --legacy-cmap --recalc-bounds
+```
+
+回归测试：`crates/skyward-ui/src/font.rs` 的
+`the_subset_typeface_keeps_its_weights_and_draws_both_scripts`。
+
+局限：文件管理器/终端/SSID 中超出常用集的生僻字会显示为缺字方框。
 
 ## 4. 代码改动
 
@@ -190,19 +216,21 @@ RUSTFLAGS="-C target-feature=+crt-static" cargo ndk -t arm64-v8a --platform 30 \
 # 打包器
 cargo build --release -p skyward-pack
 
-# 出镜像
+# 出镜像（kebab 用子集字体）
 target/release/skyward-pack recovery \
   --stock cache/recovery.img \
   --binary target/aarch64-linux-android/release/skyward \
   --system-init target/system-init/aarch64-linux-android/release/system-init \
   --config devices/kebab.toml \
-  --font resources/fonts/MiSansVF.ttf \
+  --font resources/fonts/MiSans-Subset.ttf \
   --mono resources/fonts/KirkMono-Regular.ttf \
   --mono-license resources/fonts/KirkMono-OFL.txt \
   --out skyward-kebab.img
 ```
 
 ### 5.1 体积预算（实测）
+
+用完整 MiSans：
 
 | 组成 | MiB |
 |---|---|
@@ -212,10 +240,19 @@ target/release/skyward-pack recovery \
 | dtb | 1.36 |
 | header + vbmeta + footer | 0.01 |
 | **合计** | **95.81** |
-| stock 镜像大小 | 96.00 |
-| 实际分区 | 100.00 |
 
-余量约 4 MiB（stock 镜像本身只填了 96 MiB，分区是 100 MiB）。
+用子集 MiSans（当前）：
+
+| 组成 | MiB |
+|---|---|
+| kernel | 54.28 |
+| ramdisk | 27.19 |
+| recovery_dtbo | 0.84 |
+| dtb | 1.36 |
+| header + vbmeta + footer | 0.01 |
+| **合计** | **83.68** |
+
+stock 镜像大小 96.00 MiB，实际分区 100.00 MiB；用子集后余量 **12.32 MiB**（完整字体时 4.19 MiB）。
 
 ramdisk 内新增：
 
@@ -384,7 +421,7 @@ kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。�
 3. 复测 MTP（重新打开 File transfer）
 4. 增加 Keymaster 4.x HIDL 客户端（解密）
 5. 增加 LED 振动后端（可选）
-6. 字体子集化（可选，省约 10 MiB）
+6. ~~字体子集化~~ 已完成：`resources/fonts/MiSans-Subset.ttf`（ramdisk 39.3 → 27.2 MiB）
 
 安全事项：
 
