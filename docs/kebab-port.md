@@ -329,6 +329,46 @@ fastboot boot /tmp/opencode/skyward-kebab.img
 
 ### 8.1 Wi-Fi 不启动（主要未完成项）
 
+#### 8.1.1 进展（2026-11-17 晚，实机验证）
+
+WLAN 在 recovery 里需要三个 Android 侧的用户态组件，缺一不可：
+
+| 组件 | 作用 | 缺省表现 |
+|---|---|---|
+| `/vendor/bin/qrtr-ns` | QMI 名称服务 | 固件停在 `MHI MISSION_MODE`，QMI 服务永远不出现 |
+| `/vendor/bin/cnss-daemon` | 校准数据 / MAC 的 QMI 服务端 | 无 `FW_READY` |
+| `/data/vendor/wifi/sockets` | cnss-daemon 的用户 socket 目录 | cnss-daemon 启动即退出 |
+
+加入前两者并创建该目录后，实机日志：
+
+```
+cnss: QMI WLFW service connected
+cnss: Sending host capability message
+cnss: Received QMI WLFW calibration done indication
+cnss: Calibration completed successfully
+（cnss-daemon 生成 /data/vendor/wifi/wlfw_cal_01.bin，875832 字节）
+```
+
+`devices/kebab.toml` 已加入这两个 `[[service]]`，其中 `cnss-daemon` 以
+`system` 用户、`system/inet/net_admin/wifi` 组、`NET_ADMIN` 能力运行；
+Skyward 的账号表原先缺 `inet`/`net_raw`/`net_admin`，已补上（`skyward-sys/ueventd.rs`）。
+
+仍未解决：**mission 模式**。每次写 `fs_ready` 都进入 `CALIBRATION`，
+校准完成后不再上电，因此没有 `hif_pci_enable_bus` 和 `wlan0`。
+Android 里由 wifi HAL 触发第二次上电；内核侧链路为
+`cnss_wlan_register_driver → cnss_pci_register_driver_hdlr → cnss_pci_dev_powerup`，
+对应 qcacld 的 `wlan_hdd_pld_probe → hdd_wlan_startup`。
+
+待查方向：
+
+- qcacld 在本机是内建（`CONFIG_QCA_CLD_WLAN=y`），驱动在**内核启动早期**就注册，
+  早于 Skyward 挂载 `/vendor/firmware_mnt`；注册失败后不会重试
+- 打开 `/dev/wlan` 不会触发 `hdd_wlan_startup`（实测无日志）
+- 可尝试：给 qcacld 开动态调试、或在驱动注册前让固件分区可见（需要改内核/init 时序）
+
+结论：Wi-Fi 从「完全不通」推进到「固件握手 + 校准成功」，只差 mission 模式这一步。
+
+
 现象：
 
 ```
