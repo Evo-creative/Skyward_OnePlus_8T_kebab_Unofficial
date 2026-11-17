@@ -61,19 +61,20 @@ partition = "modem"
 # service is found through, and the daemon that carries the calibration and
 # the MAC address between the firmware and the modem. Neither runs by
 # itself in a recovery, and without them the firmware never reports ready.
-# Neither is started for now: driving the firmware through them ends in a
-# CNSS_ASSERT in the secure world, and the phone's bootloader's emergency
-# download mode. WLAN is left for later, when that is understood.
-#
-# [[service]]
-# path = "/vendor/bin/qrtr-ns"
-#
-# [[service]]
-# path = "/vendor/bin/cnss-daemon"
-# args = ["-n"]
-# user = "system"
-# groups = ["system", "inet", "net_admin", "wifi"]
-# capabilities = ["NET_ADMIN"]
+# The QMI name service the firmware's service is found through, and the
+# daemon that carries the calibration and the MAC address between the
+# firmware and the modem. Neither runs by itself in a recovery, and without
+# them the firmware never reports ready. The daemon answers on a folder of
+# its own on the data partition, which is made when the WLAN comes up.
+[[service]]
+path = "/vendor/bin/qrtr-ns"
+
+[[service]]
+path = "/vendor/bin/cnss-daemon"
+args = ["-n"]
+user = "system"
+groups = ["system", "inet", "net_admin", "wifi"]
+capabilities = ["NET_ADMIN"]
 
 [wlan]
 modules = []

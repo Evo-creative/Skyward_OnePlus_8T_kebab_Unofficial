@@ -189,6 +189,13 @@ enum Cmd {
         #[arg(long)]
         key: Option<PathBuf>,
     },
+    /// Bring the WLAN up on its own: the driver loaded, the chip
+    /// calibrated, and the interface up.
+    #[cfg(target_os = "android")]
+    WlanUp {
+        #[arg(long, default_value = "/skyward/device.toml")]
+        config: PathBuf,
+    },
     /// Say what the phone's credential service answers, which takes no
     /// credential and changes nothing.
     #[cfg(target_os = "android")]
@@ -391,6 +398,15 @@ fn main() -> Result<()> {
                 let raw = stored.unwrap(skyward_crypto::keystore::Unwrap::Hardware(&service))?;
                 println!("{} holds a key of {} bytes", key.display(), raw.len());
             }
+            Ok(())
+        }
+        #[cfg(target_os = "android")]
+        Cmd::WlanUp { config } => {
+            let cfg = DeviceConfig::load(&config)?;
+            let wlan = cfg.wlan.as_ref().context("the configuration describes no WLAN")?;
+            let modules = cfg.modules.sources.iter().map(|s| skyward_modules::source_dir(s)).collect::<Result<Vec<_>>>()?;
+            wlan::bring_up_for(wlan, &modules)?;
+            println!("{} is up", wlan.interface);
             Ok(())
         }
         #[cfg(target_os = "android")]

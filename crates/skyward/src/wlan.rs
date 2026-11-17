@@ -42,6 +42,24 @@ const WIFI: u32 = 1010;
 /// loading meanwhile.
 const INTERFACE_WAIT: Duration = Duration::from_secs(20);
 
+/// The switch the phone's own system turns its WLAN on with: the driver
+/// loads when "ON" is written to it, and waits for a cold-boot calibration
+/// under way before it probes the chip, much as a supplicant's HAL does.
+const SWITCH: &str = "/dev/wlan";
+
+/// How long the cold-boot calibration the firmware runs gets to begin
+/// before the switch is thrown: the driver waits for it only once it has.
+const CALIBRATION_START: Duration = Duration::from_secs(2);
+
+/// Where the phone's own WLAN daemon answers the firmware's calibration
+/// asks, and the folder above it, on the data partition, which is there
+/// once it is open.
+const DAEMON_FOLDER: &str = "/data/vendor/wifi";
+const DAEMON_SOCKETS: &str = "/data/vendor/wifi/sockets";
+
+/// The account the daemon runs as: system, its number and its group's.
+const SYSTEM: (u32, u32) = (1000, 1000);
+
 /// How long the supplicant may take to open its control socket.
 const SOCKET_WAIT: Duration = Duration::from_secs(10);
 
@@ -620,6 +638,12 @@ impl Station {
     }
 }
 
+/// Bring the WLAN up as the pages do, for trying it out on its own: the
+/// driver loaded, the chip calibrated, and the interface up.
+pub fn bring_up_for(cfg: &Config, modules: &[PathBuf]) -> Result<()> {
+    bring_up(cfg, modules)
+}
+
 /// Load the driver where its interface is not there yet, and bring the
 /// interface up.
 fn bring_up(cfg: &Config, modules: &[PathBuf]) -> Result<()> {
@@ -631,9 +655,24 @@ fn bring_up(cfg: &Config, modules: &[PathBuf]) -> Result<()> {
         for path in skyward_modules::load(modules, &cfg.modules)? {
             skyward_sys::kmsg(&format!("loaded {}", path.display()))?;
         }
+        // The daemon that answers the firmware's calibration asks keeps its
+        // sockets here, and leaves at once where the folder is not there.
+        // It runs as system, so the folders are its own.
+        match daemon_folder() {
+            Ok(()) => {}
+            // The data partition is not open yet; the daemon leaves until it
+            // is, and the service directory starts it again.
+            Err(e) => skyward_sys::kmsg(&format!("the WLAN daemon's folder was not made: {e:#}"))?,
+        }
         for w in &cfg.writes {
             fs::write(&w.path, &w.value).with_context(|| format!("write {} to {}", w.value, w.path))?;
         }
+        if !cfg.writes.is_empty() {
+            // The firmware calibrates on its first start, and the driver's
+            // switch waits for that calibration once it has begun.
+            thread::sleep(CALIBRATION_START);
+        }
+        turn_on()?;
         let until = Instant::now() + INTERFACE_WAIT;
         while !net.exists() {
             ensure!(Instant::now() < until, "the driver made no {} in {} seconds", cfg.interface, INTERFACE_WAIT.as_secs());
@@ -641,6 +680,28 @@ fn bring_up(cfg: &Config, modules: &[PathBuf]) -> Result<()> {
         }
     }
     iface::set_up(&cfg.interface, true)
+}
+
+/// Make the folders the WLAN daemon keeps its sockets in, its own to write
+/// in.
+fn daemon_folder() -> Result<()> {
+    for path in [DAEMON_FOLDER, DAEMON_SOCKETS] {
+        fs::create_dir_all(path).with_context(|| format!("make {path}"))?;
+        let _ = std::os::unix::fs::chown(path, Some(SYSTEM.0), Some(SYSTEM.1));
+        fs::set_permissions(path, fs::Permissions::from_mode(0o770)).with_context(|| format!("open {path} to the daemon"))?;
+    }
+    Ok(())
+}
+
+/// Turn the driver on through the switch the phone's own supplicant uses,
+/// which loads it and probes the chip.
+fn turn_on() -> Result<()> {
+    let switch = Path::new(SWITCH);
+    if !switch.exists() {
+        return Ok(());
+    }
+    // The switch reads three bytes and looks at the first two.
+    fs::write(switch, b"ON\0").with_context(|| format!("turn the WLAN driver on through {SWITCH}"))
 }
 
 /// Put a file the driver asks for where the firmware loader looks.
