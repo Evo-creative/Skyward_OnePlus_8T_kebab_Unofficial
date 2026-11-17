@@ -33,22 +33,12 @@ Wi-Fi, Skyward's online update and dual boot.
 
 ### Flashing
 
-Take the phone's own recovery first, once, before Skyward is flashed: boot into it
-(`adb reboot recovery`) and read the partition there, where adb is already root.
-From a booted system it needs root first (`adb root`, or `su`). After that the
-recovery partition holds Skyward, and this file is also the way back.
-
-```sh
-adb shell 'dd if=/dev/block/by-name/recovery_a of=/tmp/recovery.img'
-adb pull /tmp/recovery.img cache/recovery.img
-```
-
-Then flash the image built below. Verified boot must be off, only the recovery
-partition is written, and the bootloader stays unlocked:
+Flash the released `skyward-kebab.img`. Verified boot must be off, only the
+recovery partition is written, and the bootloader stays unlocked:
 
 ```sh
 adb reboot bootloader
-fastboot flash recovery cache/skyward-kebab-100.img
+fastboot flash recovery skyward-kebab.img
 fastboot reboot recovery
 ```
 
@@ -56,6 +46,17 @@ fastboot reboot recovery
 
 Needs the Rust that `rust-toolchain.toml` names with its `aarch64-linux-android`
 target, Android NDK r29, and [cargo-ndk](https://github.com/bbqsrc/cargo-ndk).
+
+Take the phone's own recovery first: boot into it (`adb reboot recovery`) and read
+the partition there, where adb is already root. From a booted system it needs root
+first (`adb root`, or `su`).
+
+```sh
+adb shell 'dd if=/dev/block/by-name/recovery_a of=/tmp/recovery.img'
+adb pull /tmp/recovery.img cache/recovery.img
+```
+
+Then build it; the result is the released `skyward-kebab.img`:
 
 ```sh
 cargo ndk -t arm64-v8a --platform 30 build --release -p skyward
@@ -68,11 +69,12 @@ target/release/skyward-pack recovery --stock cache/recovery.img \
   --font resources/fonts/MiSans-Subset.ttf \
   --mono resources/fonts/KirkMono-Regular.ttf \
   --mono-license resources/fonts/KirkMono-OFL.txt \
-  --size 104857600 --out cache/skyward-kebab-100.img
+  --size 104857600 --out cache/skyward-kebab.img
 ```
 
 The system-init program is built although kebab cannot hold a second system,
 because the packer takes it.
+
 
 ## Features
 

@@ -27,24 +27,26 @@ Skyward 是使用 Rust 编写的 recovery，从零开始编写。
 
 ### 刷入
 
-第一次刷入 Skyward 之前，先进入手机原来的 recovery（`adb reboot recovery`），再把 recovery 分区取出来。recovery 里的 adb 已经是 root，不需要 `adb root`；若在正常系统里取，则要先 root（`adb root` 或 `su`）。这份镜像也是刷回去用的：
-
-```sh
-adb shell 'dd if=/dev/block/by-name/recovery_a of=/tmp/recovery.img'
-adb pull /tmp/recovery.img cache/recovery.img
-```
-
-然后刷入下面构建出的镜像。先关闭验证，只写 recovery 分区，不要锁 bootloader：
+刷入发布页的 `skyward-kebab.img`。先关闭验证，只写 recovery 分区，不要锁 bootloader：
 
 ```sh
 adb reboot bootloader
-fastboot flash recovery cache/skyward-kebab-100.img
+fastboot flash recovery skyward-kebab.img
 fastboot reboot recovery
 ```
 
 ### 构建
 
 需要 `rust-toolchain.toml` 指定版本的 Rust 及其 `aarch64-linux-android` 目标、Android NDK r29 和 [cargo-ndk](https://github.com/bbqsrc/cargo-ndk)。
+
+先从手机里取出原来的 recovery：进入 recovery（`adb reboot recovery`）再读分区，那里的 adb 已经是 root，不需要 `adb root`；若在正常系统里取，则要先 root（`adb root` 或 `su`）。
+
+```sh
+adb shell 'dd if=/dev/block/by-name/recovery_a of=/tmp/recovery.img'
+adb pull /tmp/recovery.img cache/recovery.img
+```
+
+然后构建（产品就是发布页的 `skyward-kebab.img`）：
 
 ```sh
 cargo ndk -t arm64-v8a --platform 30 build --release -p skyward
@@ -57,10 +59,11 @@ target/release/skyward-pack recovery --stock cache/recovery.img \
   --font resources/fonts/MiSans-Subset.ttf \
   --mono resources/fonts/KirkMono-Regular.ttf \
   --mono-license resources/fonts/KirkMono-OFL.txt \
-  --size 104857600 --out cache/skyward-kebab-100.img
+  --size 104857600 --out cache/skyward-kebab.img
 ```
 
 虽然 kebab 装不了第二系统，打包器仍需要 system-init，所以照常构建。
+
 
 ## 功能
 
