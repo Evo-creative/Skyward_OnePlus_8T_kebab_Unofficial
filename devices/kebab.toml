@@ -13,7 +13,7 @@ diagonal = 6.55
 corner_radius = 24
 # The front camera is cut into the top-left corner, over where the status
 # bar's clock sits: it starts a digit further right than usual.
-status_inset = 10
+status_inset = 16
 
 # Every driver the recovery needs is built into the kernel this phone's
 # system installs, apart from gspca_main, so none is loaded here. The
