@@ -46,6 +46,10 @@ bootloader
 
 采集方式见 §10。
 
+> 数据来源：以下均取自**实机**（adb）与 `cache/recovery.img`（LineageOS 24.0）。
+> `~/work/PixelOS_kebab` 仅作设备树/配置的阅读参考：该树**从未成功构建**，
+> 仓库也不是最新，其 `out/` 产物不可用于刷写或恢复。
+
 ```
 model            OnePlus 8T (KB2000), codename kebab
 系统             Android 17 / CP2A.260605.016（LineageOS 24）
@@ -441,8 +445,12 @@ kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。�
    fastboot flash recovery skyward-kebab.img
    ```
 
-2. 出现 `image destroyed` 提示时，刷回 ROM 的 `vbmeta.img` 与 `dtbo.img` 即可恢复
-   （实测有效）。
+2. 出现 `image destroyed` 提示时，用**同一个 ROM 包**里的 `vbmeta.img`、`boot.img`、`dtbo.img`
+   一起恢复（实测：只刷 vbmeta 与 dtbo 仍进入该页面，补刷匹配的 `boot.img` 后恢复）。
+   这说明「boot 被写坏」的表象，实际是 **vbmeta 记录的哈希/公钥与 boot 不匹配**。
+
+3. 恢复镜像只能取自 `~/Downloads/lineage-24.0-*-kebab-signed.zip`：
+   `~/work/PixelOS_kebab` 从未成功构建，其 `out/` 下的产物**不可使用**。
 
 后续改进（可选）：
 
@@ -454,11 +462,12 @@ kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。�
 优先级从高到低：
 
 1. **刷入前先确认 `Verity mode` 与 vbmeta 状态**（见 §8.6）；未签名镜像只在禁用校验时可启动
-2. 若仍不通：给 cnss2 打开调试能力（需要可用的 debugfs 挂载点），或在 ramdisk 里预留 `/sys/kernel/debug`；同时对比 wifi HAL 打开 `/dev/wlan` 后驱动行为
-3. 复测 MTP（重新打开 File transfer）
-4. 增加 Keymaster 4.x HIDL 客户端（解密）
-5. 增加 LED 振动后端（可选）
-6. ~~字体子集化~~ 已完成：`resources/fonts/MiSans-Subset.ttf`（ramdisk 39.3 → 27.2 MiB）
+2. **日常测试只用 `fastboot boot`**，不再刷 recovery，直到 §8.6 的问题解决
+3. 若仍不通：给 cnss2 打开调试能力（需要可用的 debugfs 挂载点），或在 ramdisk 里预留 `/sys/kernel/debug`；同时对比 wifi HAL 打开 `/dev/wlan` 后驱动行为
+4. 复测 MTP（重新打开 File transfer）
+5. 增加 Keymaster 4.x HIDL 客户端（解密）
+6. 增加 LED 振动后端（可选）
+7. ~~字体子集化~~ 已完成：`resources/fonts/MiSans-Subset.ttf`（ramdisk 39.3 → 27.2 MiB）
 
 安全事项：
 
