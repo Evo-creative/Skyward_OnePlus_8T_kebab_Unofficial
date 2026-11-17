@@ -5,9 +5,10 @@
 
 ## 1. 现状摘要
 
-结论：**Skyward 能在 kebab 上刷入启动并正常运行 UI、触摸、高刷、分区操作**；
-**Wi-Fi 已打通固件握手与校准，但没有 `wlan0`**；**`/data` 解密不可用**（缺 KeyMint AIDL）；
-双系统因无 `init_boot` 而不可行。
+结论：**Skyward 在 kebab 上已能完整使用**：UI、120Hz、触摸、背光、振动、`/data` 解密（含用户 CE）、
+文件管理、MTP（需先解密）、分区操作、日志与 SELinux 修复。
+**Wi-Fi 已打通固件握手与校准，但没有 `wlan0`**，是目前唯一未实现的功能；
+双系统因无 `init_boot` 而不可行（已加保护）。
 
 状态：✅ 实机验证 ｜ 🟡 代码就绪未验证 ｜ 🟠 部分可用 ｜ ❌ 未实现 / 受阻
 
@@ -32,7 +33,7 @@
 | **120Hz 高刷** | ✅ | DRM 有 60/120 两个模式，UI 切到最快 |
 | 触摸 | ✅ | Synaptics S3908，evdev `input2` |
 | 背光 / 亮度 | ✅ | `panel0-backlight`，normal-max 修复（`af3ceb5`） |
-| 振动 | ❌ | AW8697 走 `/sys/class/leds/vibrator`，Skyward 用 evdev FF |
+| 振动 | ✅ | AW8697 走 `/sys/class/leds/vibrator`；新增 LED 后端，点击/开关/键盘/滑块/熄屏双击都有反馈（`56530ac`、`7606a6a`） |
 | 语言切换（简/繁/英） | 🟡 | 字体子集已覆盖 UI 全部字符，实机未切换 |
 | 字体显示 | ✅ | MiSans 子集，ramdisk 39.3 → 27.2 MiB（`00b9f39`） |
 | 搜索 / 主题 / 时区 | 🟡 | 代码就绪，未逐项验证 |
@@ -51,9 +52,9 @@
 | 刷镜像 / zip / payload OTA | 🟡 | 代码通用，未在 Skyward 内验证 |
 | AVB 处理（avbctl） | 🟡 | 符号链接已注入，未测 |
 | 擦除 / 格式化 / 工厂重置 | 🟡 | 未测 |
-| **`/data` 解密（FBE+metadata）** | ❌ | 本机只有 Keymaster 4.x HIDL，Skyward 需 KeyMint AIDL |
-| 文件管理器（内部存储） | ❌ | 被解密阻塞 |
-| MTP（内部存储） | 🟠 | 修复已提交（`e017082`），未复测，且依赖解密 |
+| **`/data` 解密（FBE+metadata）** | ✅ | Keymaster 4.x HIDL 客户端已实现；metadata key、wrapped key、dm-default-key、用户 CE 全部打通（见 §8.3） |
+| 文件管理器（内部存储） | ✅ | `/data` 打开后可浏览 |
+| MTP（内部存储） | 🟠 | 设备能被电脑识别；**内部存储在 `/data` 解锁后才出现**，待按 §8.2 复测读写 |
 
 ### 1.4 连接与网络
 
@@ -61,23 +62,23 @@
 |---|---|---|
 | adb root shell | ✅ | File transfer 关闭时正常 |
 | MTP | 🟠 | 见 1.3；USB 端口问题已修 |
-| **Wi-Fi** | 🟠 | QMI 握手 + 校准成功；无 `wlan0` |
+| **Wi-Fi** | 🟠 | QMI 握手 + 校准成功；无 `wlan0`。相关服务已从配置注释掉，避免 `CNSS_ASSERT` → EDL |
 | 在线检查更新（GitHub） | ❌ | 依赖 Wi-Fi |
 | fastbootd | 🟡 | 未测 |
 
 ### 1.5 量化
 
-- **完全可用**：启动、UI、120Hz、触摸、背光、分区挂载、adb、About、字体（9 项）
-- **代码就绪待验证**：约 12 项（槽位切换、备份恢复、刷写、语言切换、MTP…）
-- **未实现 / 受阻**：6 项（Wi-Fi 完整、解密、内部存储文件管理、MTP 内部存储、在线更新、双系统）
+- **完全可用**：启动、UI、120Hz、触摸、背光、振动、`/data` 解密、内部存储文件管理、分区挂载、adb、日志、SELinux 修复、About、字体
+- **代码就绪待验证**：槽位切换、备份/恢复、刷写、fastbootd、语言切换、MTP 复测（按约定暂不逐项实测）
+- **未实现 / 受阻**：Wi-Fi 完整（唯一功能缺口）、在线更新（依赖 Wi-Fi）、双系统（无 `init_boot`）
 
 ### 1.6 阻塞项
 
 | 阻塞 | 影响 | 需要的工作 |
 |---|---|---|
 | Wi-Fi mission 模式 | Wi-Fi 与在线更新全部功能 | 离线定位触发条件，见 §8.1.1 |
-| Keymaster 4.x HIDL | 解密、文件管理、MTP | 给 `skyward-crypto` 加 Keymaster HIDL 客户端 |
 | 无 `init_boot` | 双系统 | 重新设计第二系统 first-stage 存放方式 |
+| 显示提交超时 | 以前会 panic → EDL | 已注册 DRM 恢复事件（§8.3.3）；待观察是否还有超时 |
 | AW8697 接口 | 振动 | LED-class 后端（小改动） |
 
 ## 2. Skyward 的工作方式（与本机相关部分）
@@ -171,10 +172,15 @@ Weaver                无
 
 ```
 接口             /sys/class/leds/vibrator/
-                 ├─ activate, duration, brightness, max_brightness
-                 ├─ rtp, waveform_index, gain, f0, ...
+                 ├─ state, duration, activate, gain, brightness
+                 ├─ rtp, waveform_index, f0, ...
                  └─ 无 evdev force-feedback
 ```
+
+驱动（`aw8697_haptic`）的 OL 用法：`state=1` → `duration=<ms>` → `activate=1` 播放一个片段；
+`duration<=500` 时片段索引由时长决定（`10` 和 `1` 是同一个最短片段），`>500` 走长片段。
+`gain` 0x01–0x75（0x00 不振），官方 HAL 不写 gain。
+Skyward 的映射见 §8.4。
 
 ### 3.6 字体
 
@@ -226,6 +232,16 @@ KirkMono-Regular.ttf   264 KB / 142 KB
 | `682cc60` | **关键**：v0–v2 header 的 `recovery_dtbo_offset` 按实际布局重算（修好刷入启动） |
 | `d873027` | 无 `init_boot` 的手机不写 `boot`/`init_boot`（库级保护） |
 | `a3eece6`/`4a32ba5` | 文档：AVB 未签名 footer 与验证模式；Wi-Fi 需要的用户态组件与卡点 |
+| `bd3258c` | Keymaster 4.x HIDL 客户端：begin/update/finish/abort、exportKey、`KeyService` trait |
+| `65ef709` | 硬件服务目录先于注册到它的服务启动；优先用已安装系统的 bootstrap loader |
+| `2a6a375` | `phones.rs` 期望的顺序改为目录在前 |
+| `bfe5a64` | **关键**：HIDL 线上格式（ASCII 接口名、4.0 名字、parent_offset、返回值顺序、KeyParameter 32 字节、空 vec 记录） |
+| `38fdbda`/`4727a1e` | blob 前缀 `pKMblob` 剥离；`upgradeKey` 重试；AIDL header 按恢复/系统选择 |
+| `6c3117e` | 长错误信息按屏幕宽度换行 |
+| `56530ac` | 振动 LED 后端（`[haptics] led`），强度映射 gain |
+| `7606a6a` | 每次「点一下就生效」的交互都振（开关、跳转行、键盘、按键选中） |
+| `41b6128` | 启动时把 pstore 的上次记录复制到 `/metadata/skyward/crash/` |
+| `445037e`/`af0fbc1` | 显示超时不再 panic：注册 `DRM_EVENT_SDE_HW_RECOVERY`；面板不再 rest/关断 |
 
 ### 4.1 为什么需要 boot header v2
 
@@ -359,8 +375,9 @@ skyward: 119 device nodes given the owner their phone describes
 skyward: modem is mounted on /vendor/firmware_mnt, shown at /firmware
 skyward: persist is mounted on /mnt/vendor/persist
 skyward: the service directory is told of 22 of the phone's own services
-skyward: devices not brought up: ... no ...keymint.IKeyMintDevice/default
-skyward: the pages speak En, with none chosen, and the locale named is en-US
+skyward: for the phone's keys: start /vendor/bin/qseecomd ...
+skyward: the display driver will tell of a failed commit rather than stop the kernel
+skyward: the pages speak Hans, the language chosen, and the locale named is en-US
 ```
 
 ### 6.2 面板
@@ -394,8 +411,10 @@ fastboot boot /tmp/opencode/skyward-kebab.img
 
 ### 8.1 Wi-Fi 不启动（主要未完成项）
 
-> 当前状态（2026-11-17 收尾）：固件加载、QMI 握手、冷启动校准均已通过，
+> 当前状态（2026-11-18）：固件加载、QMI 握手、冷启动校准均已通过，
 > 但**没有进入 mission 模式**，因此没有 `wlan0`。详见 §8.1.1。
+> **`qrtr-ns` 与 `cnss-daemon` 已从 `devices/kebab.toml` 注释掉**：反复驱动会触发
+> `CNSS_ASSERT` 并让设备进 EDL，等离线分析清楚再恢复。
 > 下方「现象」是最初的记录，保留作为对照。
 
 #### 8.1.1 进展（2026-11-17 晚，实机验证）
