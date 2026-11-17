@@ -2381,14 +2381,14 @@ impl Pages<'_> {
                 skyward_sys::kmsg(&format!("what was entered did not open the user's files: {why}"))?;
                 self.app.unlock_failed(why, now);
             }
-            decrypt::Ended::Closed(Ok(())) => {
-                skyward_sys::kmsg("the data partition is closed again")?;
+            decrypt::Ended::Umounted(Ok(())) => {
+                skyward_sys::kmsg("the data partition is unmounted again")?;
                 self.closed.clear();
-                self.app.data_closed(Ok(()), now);
+                self.app.data_umounted(Ok(()), now);
             }
-            decrypt::Ended::Closed(Err(why)) => {
-                skyward_sys::kmsg(&format!("the data partition stays open: {why}"))?;
-                self.app.data_closed(Err(why), now);
+            decrypt::Ended::Umounted(Err(why)) => {
+                skyward_sys::kmsg(&format!("the data partition stays mounted: {why}"))?;
+                self.app.data_umounted(Err(why), now);
             }
         }
         // Screenshots taken while internal storage was closed go into
@@ -2597,7 +2597,7 @@ impl Pages<'_> {
                 let job = decrypt::Job::Unlock { closed: self.closed.clone(), user, credential: code.into_bytes() };
                 self.decryptor = Some(Decryptor::start(job)?);
             }
-            Effect::CloseData => self.close_data(now)?,
+            Effect::UmountData => self.umount_data(now)?,
             Effect::ReadDir(folder) => list(&mut self.app, folder)?,
             Effect::ReadPlace(place, folder) => list_place(&mut self.app, place, folder)?,
             Effect::Paste { op, path, into, clash } => self.paste(op, path, into, clash, now)?,
@@ -2867,10 +2867,10 @@ impl Pages<'_> {
         Ok(())
     }
 
-    /// Close the data partition again, as the decrypt page asked: every
+    /// Unmount the data partition again, as the decrypt page asked: every
     /// program that reads it ends, file transfer lets internal storage go
     /// first, and the partition is left as it is.
-    fn close_data(&mut self, now: u64) -> Result<()> {
+    fn umount_data(&mut self, now: u64) -> Result<()> {
         // The page hides the way while any of this runs; a request that
         // still arrives is told to wait rather than cut the work off.
         let busy = self.installer.is_some()
@@ -2896,8 +2896,8 @@ impl Pages<'_> {
         if !withhold(&mut self.transfer, &mut self.app, now)? {
             return Ok(());
         }
-        skyward_sys::kmsg("closing the data partition, as the decrypt page asked")?;
-        self.decryptor = Some(Decryptor::start(decrypt::Job::Close)?);
+        skyward_sys::kmsg("unmounting the data partition, as the decrypt page asked")?;
+        self.decryptor = Some(Decryptor::start(decrypt::Job::Umount)?);
         Ok(())
     }
 

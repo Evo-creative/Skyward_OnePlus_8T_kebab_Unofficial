@@ -134,7 +134,7 @@ pub fn confirm_label(which: Confirm, s: &State) -> (&'static str, bool) {
         Confirm::RunScript => (INSTALL, true),
         Confirm::Merge => (["滑动以合并", "滑動以合併", "Slide to merge"], true),
         Confirm::Relabel => (["滑动以修复", "滑動以修復", "Slide to fix"], true),
-        Confirm::CloseData => (["滑动以卸载 data 分区", "滑動以卸載 data 分割區", "Slide to unmount data"], true),
+        Confirm::UmountData => (["滑动以卸载 data 分区", "滑動以卸載 data 分割區", "Slide to unmount data"], true),
         Confirm::SwitchSystem => (["滑动以切换并重启", "滑動以切換並重新啟動", "Slide to switch and reboot"], false),
         Confirm::RemoveSystem => (["滑动以删除", "滑動以刪除", "Slide to remove"], true),
         Confirm::InstallSystem => (INSTALL, false),
@@ -710,11 +710,11 @@ pub fn decrypt(cx: &Ctx) -> Frame {
                 !busy,
             )
         }
-        Data::Closing => data_status(
+        Data::Umounting => data_status(
             cx,
             c,
             Icon::Lock,
-            l.pick(["正在卸载 data 分区", "正在卸載 data 分割區", "Unmounting the data partition"]),
+            l.pick(["正在卸载 data 分区", "正在卸載 data 分割區", "Umounting the data partition"]),
             Some(l.pick(["请稍候", "請稍候", "One moment"])),
             None,
         ),
@@ -736,8 +736,8 @@ fn data_status(cx: &Ctx, c: Canvas, icon: Icon, title: &str, note: Option<&str>,
     data_status_of(cx, c, icon, title, note, why, false)
 }
 
-/// The same, with a way to close the partition again under it where
-/// `closable`, which only an open partition is.
+/// The same, with a way to unmount the partition again under it where
+/// `closable`, which only a mounted partition is.
 fn data_status_of(cx: &Ctx, mut c: Canvas, icon: Icon, title: &str, note: Option<&str>, why: Option<&str>, closable: bool) -> Frame {
     let (t, f, l) = (cx.t, cx.f, cx.state.lang);
     let m = &t.m;
@@ -757,16 +757,16 @@ fn data_status_of(cx: &Ctx, mut c: Canvas, icon: Icon, title: &str, note: Option
     }
     if closable {
         // A way to let go of the partition again, under what it holds: the
-        // swipe that closes it, and what stops working once it is.
+        // swipe that unmounts it, and what stops working once it is.
         let note = l.pick([
             "卸载后，内部存储、文件管理与 MTP 都将不可用；随时可以重新解密。",
             "卸載後，內部儲存空間、檔案管理與 MTP 都將無法使用；隨時可以重新解密。",
             "Once unmounted, internal storage, file manager and MTP are gone until it is decrypted again.",
         ]);
         let y = widgets::footnote(&mut c, t, f, sign_cy + m.dp(150.0), note);
-        let (label, danger) = confirm_label(Confirm::CloseData, cx.state);
+        let (label, danger) = confirm_label(Confirm::UmountData, cx.state);
         let track = widgets::confirm(&mut c, t, f, y + m.dp(20.0), label, danger, cx.state.confirm);
-        out.push(Hit { rect: track, action: Action::Confirm(Confirm::CloseData) });
+        out.push(Hit { rect: track, action: Action::Confirm(Confirm::UmountData) });
     }
     let leave_cy = m.h as f32 - m.dp(64.0);
     let leave = l.pick(if matches!(cx.state.data, Data::Open | Data::Erased) { ["完成", "完成", "Done"] } else { NOT_NOW });
@@ -2278,7 +2278,7 @@ pub fn relabel(cx: &Ctx) -> Frame {
         let note = match s.data {
             Data::Open | Data::Locked { .. } => None,
             Data::Erased => Some(["data 分区已清除。", "data 分割區已清除。", "The data partition was wiped."]),
-            Data::Closed | Data::Opening | Data::Closing | Data::Failed(_) => {
+            Data::Closed | Data::Opening | Data::Umounting | Data::Failed(_) => {
                 Some(["暂无法修复，需先在「解密」中打开 data 分区。", "暫時無法修復，需先在「解密」中開啟 data 分割區。", "Open the data partition in Decrypt first."])
             }
         };
