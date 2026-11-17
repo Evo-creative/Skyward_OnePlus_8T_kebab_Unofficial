@@ -167,6 +167,10 @@ impl<'a> KeyMint<'a> {
     }
 
     fn convert(&self, key: &[u8]) -> Result<Vec<u8>> {
+        // The key may come out of a directory Android wrote, with the
+        // prefix its keystore puts before a blob, which the service does
+        // not take.
+        let key = crate::keystore::without_prefix(key);
         let mut call = Parcel::call(DEVICE);
         call.blob(key);
         let reply = self.device.transact(CONVERT_STORAGE_KEY, &call).context("make a storage key for this start")?;

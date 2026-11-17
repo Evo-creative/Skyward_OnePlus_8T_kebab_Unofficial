@@ -34,7 +34,7 @@ const BLOB_PREFIX_BYTES: usize = 8;
 
 /// The key blob as the key service takes it, without what keystore wrote
 /// before it.
-fn without_prefix(blob: &[u8]) -> &[u8] {
+pub(crate) fn without_prefix(blob: &[u8]) -> &[u8] {
     let prefixed = blob.len() >= BLOB_PREFIX_BYTES && blob.starts_with(BLOB_MAGIC) && blob[BLOB_PREFIX_BYTES - 1] <= 1;
     if prefixed { &blob[BLOB_PREFIX_BYTES..] } else { blob }
 }

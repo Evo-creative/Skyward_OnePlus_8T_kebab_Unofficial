@@ -92,6 +92,10 @@ impl<'a> Keymaster<'a> {
     /// Android's own keystore does this for vold by exporting the key in the
     /// raw form, which is what a storage key is for.
     pub fn ephemeral_storage_key(&self, key_blob: &[u8]) -> Result<Vec<u8>> {
+        // The key may come out of a directory Android wrote, with the
+        // prefix its keystore puts before a blob, which the service does
+        // not take.
+        let key_blob = crate::keystore::without_prefix(key_blob);
         let mut call = Message::call(DECLARED_IN);
         // The raw form, which the phone's own key format numbers first.
         call.u32(0);
