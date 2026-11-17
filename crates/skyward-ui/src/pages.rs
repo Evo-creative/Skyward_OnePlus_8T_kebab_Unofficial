@@ -688,7 +688,10 @@ pub fn decrypt(cx: &Ctx) -> Frame {
     let (c, l) = (page(cx), cx.state.lang);
     match &cx.state.data {
         Data::Locked { user, keys, checking } => code(cx, c, *user, *keys, *checking),
-        Data::Closed | Data::Opening => data_status(
+        // A partition that was unmounted stays that way: the page says
+        // where it stands and offers to decrypt it again.
+        Data::Closed => data_closed(cx, c),
+        Data::Opening => data_status(
             cx,
             c,
             Icon::Lock,
@@ -728,6 +731,36 @@ pub fn decrypt(cx: &Ctx) -> Frame {
             None,
         ),
     }
+}
+
+/// The partition unmounted, under its sign: what it is, and the button
+/// that decrypts it again.
+fn data_closed(cx: &Ctx, mut c: Canvas) -> Frame {
+    let (t, f, l) = (cx.t, cx.f, cx.state.lang);
+    let m = &t.m;
+    let x = m.w as f32 / 2.0;
+    let sign_cy = m.dp(150.0);
+    c.fill_circle(x, sign_cy, m.dp(30.0), t.pal.card);
+    icons::glyph(&mut c, Icon::Lock, x, sign_cy, m.dp(40.0), t.pal.accent);
+    c.text_center(
+        &f.heading,
+        l.pick(["data 分区未挂载", "data 分割區未掛載", "The data partition is not mounted"]),
+        x,
+        sign_cy + m.dp(64.0),
+        m.dp(24.0),
+        t.pal.text,
+    );
+    c.text_center(
+        &f.body,
+        l.pick(["解密后可查看本机文件", "解密後可查看本機檔案", "Decrypt it to see the phone's files"]),
+        x,
+        sign_cy + m.dp(98.0),
+        m.sub_px,
+        t.pal.subtitle,
+    );
+    let open = widgets::button(&mut c, t, f, m.h as f32 * 0.62, l.pick(["解密 data 分区", "解密 data 分割區", "Decrypt the data partition"]));
+    let out = vec![Hit { rect: open, action: Action::OpenData }];
+    Frame { header: false, ..Frame::new(t, c, out, l.pick(DECRYPT), 0.0) }
 }
 
 /// Where the partition stands, under its sign: a line on it, or why it

@@ -759,7 +759,8 @@ kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。�
      文件操作、修复、第二系统等任一进行中时入口隐藏
    - 执行：先 `withhold` 收回 MTP 的内部存储，再在 worker 里调
      `wipe::release_data()`（结束占用进程 → 卸载 `/data`、`/sdcard` → `data::close()` 移除 dm 映射）；
-     成功后状态回到 `Data::Closed`，文件管理与 MTP 一并失效，可随时重新解密
+     成功后状态回到 `Data::Closed`，文件管理与 MTP 一并失效；解密页显示「data 分区未挂载」
+     并给出「解密 data 分区」按钮（不再自动重新打开），离开页面再进入也会重新解密
    - 底层与 CLI 早已存在：`wipe::release_data()`、`skyward data --close`，
      自动用于擦除、格式化/修复文件系统、安装/更新前
 4. ~~Keymaster 4.x HIDL 客户端~~ 已完成（`bfe5a64` 起，见 8.3）

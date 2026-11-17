@@ -297,6 +297,19 @@ mod tests {
     }
 
     #[test]
+    fn an_unmounted_partition_says_so_and_is_decrypted_by_its_button() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Decrypt, W, H, PPD);
+        app.arrive();
+        app.data_waiting(None);
+        swipe(&mut app, &f, &i, Confirm::UmountData);
+        app.data_umounted(Ok(()), 0);
+        assert_eq!(app.state.data, Data::Closed);
+        assert_eq!(tap(&mut app, &f, &i, Action::OpenData), vec![Effect::OpenData], "the button decrypts it again");
+        assert_eq!(app.state.data, Data::Opening);
+    }
+
+    #[test]
     fn a_partition_that_was_unmounted_is_opened_again_by_coming_back_to_the_page() {
         let (f, i) = (fonts(), info());
         let mut app = opened(Screen::Decrypt, &f, &i);
