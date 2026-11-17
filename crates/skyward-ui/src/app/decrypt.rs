@@ -102,23 +102,25 @@ impl App {
         vec![Effect::Unlock { user, code }]
     }
 
-    /// Add the dot under the finger to the pattern being drawn.
-    pub(super) fn trace(&mut self, t: &Theme, x: f32, y: f32) {
-        let Some((cx, cy, span)) = self.frame.as_ref().and_then(|fr| fr.pattern) else { return };
+    /// Add the dot under the finger to the pattern being drawn. Gives
+    /// whether a dot was joined now, which a tap of the motor follows.
+    pub(super) fn trace(&mut self, t: &Theme, x: f32, y: f32) -> bool {
+        let Some((cx, cy, span)) = self.frame.as_ref().and_then(|fr| fr.pattern) else { return false };
         let reach = t.m.dp(widgets::PATTERN_REACH_DP);
         let dots = widgets::pattern_dots(cx, cy, span);
-        if let Some(i) = dots.iter().position(|&(dx, dy)| (dx - x).hypot(dy - y) < reach) {
-            self.join(t, i);
+        match dots.iter().position(|&(dx, dy)| (dx - x).hypot(dy - y) < reach) {
+            Some(i) => self.join(t, i),
+            None => false,
         }
     }
 
     /// Join dot `i` to the pattern being drawn, after the dot it passes
     /// straight over on its way from the last one, as the system's pattern
     /// lock joins that one too. A dot joined once is not joined again.
-    pub(super) fn join(&mut self, t: &Theme, i: usize) {
+    pub(super) fn join(&mut self, t: &Theme, i: usize) -> bool {
         let drawn = &mut self.state.pattern;
         if drawn.contains(&i) {
-            return;
+            return false;
         }
         if let Some(&last) = drawn.last() {
             let (row, col) = ((last / 3) as i32, (last % 3) as i32);
@@ -133,6 +135,7 @@ impl App {
         }
         drawn.push(i);
         self.repaint_pattern(t);
+        true
     }
 
     pub(super) fn repaint_pattern(&mut self, t: &Theme) {

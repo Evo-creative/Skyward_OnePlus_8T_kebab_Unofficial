@@ -191,7 +191,11 @@ impl App {
                     self.drag = Drag::Confirm { which, track, grab };
                 }
                 Drag::Pattern => {
-                    self.trace(&t, x, y + scroll);
+                    // Each dot joined taps the motor, as the system's own
+                    // pattern lock does.
+                    if self.trace(&t, x, y + scroll) && self.state.vibrate {
+                        fx.push(Effect::Haptic);
+                    }
                     self.drag = Drag::Pattern;
                 }
                 Drag::History { last, carry, pitch } => {

@@ -31,8 +31,11 @@ impl App {
                 if self.state.pattern.is_empty() {
                     self.say(l.pick(["连接完成后，在最后一个点上再按一次电源键", "連接完成後，在最後一個點上再按一次電源鍵", "When the pattern is done, press the power key again on its last dot"]), now);
                 }
-                self.join(&self.theme(), i);
-                Vec::new()
+                if self.join(&self.theme(), i) && self.state.vibrate {
+                    vec![Effect::Haptic]
+                } else {
+                    Vec::new()
+                }
             }
         }
     }
@@ -516,7 +519,7 @@ mod tests {
         app.frame(&f, &i);
         press(&mut app, Key::VolumeDown, 0);
         assert_eq!(lit(&mut app, &f, &i), Some(Stop::Dot(0)), "the grid's first dot is lit first");
-        assert!(press(&mut app, Key::Power, 0).is_empty());
+        assert_eq!(press(&mut app, Key::Power, 0), vec![Effect::Haptic], "joining a dot taps the motor");
         assert_eq!(app.state.pattern, [0]);
         assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("连接完成后，在最后一个点上再按一次电源键"));
         press(&mut app, Key::Power, 0);
