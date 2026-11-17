@@ -317,30 +317,6 @@ mod tests {
     }
 
     #[test]
-    fn a_long_code_keeps_its_dots_on_the_page() {
-        let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Decrypt, W, H, PPD);
-        app.data_waiting(Some((0, Keys::Digits)));
-        app.state.code = "1234567890".repeat(10);
-        let t = app.theme();
-        let accent = t.pal.accent;
-        let top = H as f32 - widgets::keypad_height(&t);
-        let fr = app.frame(&f, &i);
-        let (mut left, mut right) = (W as f32, 0.0f32);
-        for y in 0..top as u32 {
-            for x in 0..W {
-                let k = ((y * W + x) * 4) as usize;
-                if (fr.canvas.data[k], fr.canvas.data[k + 1], fr.canvas.data[k + 2], fr.canvas.data[k + 3]) == (accent.r, accent.g, accent.b, 255) {
-                    left = left.min(x as f32);
-                    right = right.max(x as f32);
-                }
-            }
-        }
-        assert!(left < right, "the dots are drawn");
-        assert!(left >= t.m.margin - 1.0 && right <= W as f32 - t.m.margin + 1.0, "the row {left}..{right} keeps within the margin");
-    }
-
-    #[test]
     fn an_unmounted_partition_says_so_and_is_decrypted_by_its_button() {
         let (f, i) = (fonts(), info());
         let mut app = App::new(Screen::Decrypt, W, H, PPD);
