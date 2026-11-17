@@ -497,17 +497,38 @@ cnss: fatal: Timeout waiting for FW ready indication
 
 待验证：重新打开 File transfer 后 MTP 是否工作。
 
-### 8.3 Data 解密不可用
+### 8.3 Data 解密（已可用，2026-11-17 深夜实机验证）
 
-本机只有 Keymaster HIDL 4.0/4.1，没有 KeyMint AIDL。`skyward-crypto/src/keymint.rs` 只实现了 AIDL 客户端。
+本机只有 Keymaster HIDL 4.0/4.1，没有 KeyMint AIDL。新增的 `skyward-crypto/src/keymaster.rs` 已完整实现 4.x HIDL 客户端并接入现有流程；recovery 里 `/data` 能挂载、能读，输入密码后用户的 CE 文件也能打开。
 
-已有的基础：
+解密链路（与 vold 一致）：
 
-- `metadata_encryption=aes-256-xts:wrappedkey_v0` 与 `keydirectory=/metadata/vold/metadata_encryption` 都在 Skyward 支持范围
-- `crypto/keystore.rs` 已能解析 `keymaster_key_blob`
-- HIDL 客户端基础设施已有（gatekeeper 用 HIDL 1.0）
+1. `/metadata/vold/metadata_encryption/key/keymaster_key_blob`（keystore 前缀 + KM blob）
+2. 去掉 `pKMblob\0` 前缀，用 KM4 `begin/update/finish` 解 `encrypted_key` → 得到 204 字节的 **hardware-wrapped key**（本身又是一个 `pKMblob` blob）
+3. 再去前缀，`exportKey(RAW)` 换成这一次启动可用的 wrapped key
+4. `dm-default-key` + `aes-xts-plain64`，cipher 带 `wrappedkey_v0`，内核走 inline crypto
+5. 用户 CE：keystore2 数据库里的 `synthetic_password_*` blob（同样带前缀），gatekeeper 通过后 `begin/update/finish` 解开
 
-需要：新增 Keymaster 4.x HIDL 客户端（getHardwareFeatures / unwrap 等），接入现有 blob 解析与 dm-default-key 流程。
+`-62 KEY_REQUIRES_UPGRADE` 时调 `upgradeKey`（方法 12）后重试，磁盘上的 blob 不改。
+
+#### 8.3.1 HIDL 4.x 的线上格式（踩过的坑，按重要度）
+
+- **接口名编码**：HIDL 用 `libhidlbase` 里自己的 `android::hardware::Parcel`（日志 tag `hw-Parcel`），接口名是「ASCII + NUL + 4 字节对齐」，**不是** libbinder 的「UTF-16 计数 + UTF-16 + 结束符」。AIDL 走 libbinder，才是后者。
+- **调用头**：libbinder 的调用头是 `[strictMode][workSource][kHeader][String16 接口名]`，而 `kHeader` 按构建分支不同：system=`SYST`、vendor=`VNDR`、recovery=`RECO`。recovery 里 `servicemanager` 是 recovery 构建，必须用 `RECO`；在 Android 里跑同一份二进制则用 `SYST`。现按 ramdisk 里是否有 `skyward/device.toml` 判断。
+- **4.1 继承 4.0**：`getHardwareInfo`/`exportKey`/`begin` 等方法都声明在 4.0，stub 校验的是 **4.0** 接口名；拿 4.1 的名字调用会被 `enforceInterface` 拒成 `BAD_TYPE(-2147483647)`。
+- **buffer 的 parent_offset**：`binder_buffer_object.parent_offset` 必须是「指针在父结构里的字节偏移」，恒写 0 会让驱动修指针时覆盖结构体首字段，内核报 `out-of-order buffer fixup` 和 `EINVAL(-22)`。
+- **内联读取顺序**：`readNullableEmbeddedBuffer` 是按顺序读 40 字节记录，所以 `vec<KeyParameter>` 的 **每个元素都必须带自己的 blob 记录**（空也要带），否则后面的流全错位。
+- **KeyParameter 布局**：32 字节 —— tag@0、union 值@8、blob 帧@16（地址 16..24、长度 24..28）。判别字段不参与判断，靠 tag 决定。
+- **返回值顺序**：`begin` 的返回是 `(error, outParams, handle)`，handle 在最后；`vec<T>` 结果要读「帧 + 数据」两层；空 vec 的数据地址为 0，要当作空处理。
+- **begin 的 inParams 不能带 `TAG_PURPOSE`**：purpose 是第一个参数，带进 params 里 QTI 会返回 `INVALID_ARGUMENT(-38)`（keystore2 里也有同样的注释）。
+- **`TAG_*` 常量**：注意 TagType 前缀（ENUM=`0x1……`、ENUM_REP=`0x2……`、UINT=`0x3……`、BOOL=`0x7……`、BYTES=`0x9……`），写错会得到 `UNSUPPORTED_ALGORITHM(-4)` 之类的误导性错误。
+- **blob 前缀**：keystore2 写的 blob 都是 `pKMblob\0` + HAL blob，交给 HAL 前必须去掉 8 字节。
+
+#### 8.3.2 仍未完成
+
+- 用户 10（工作资料）的旧密钥：已实现 `upgradeKey` 重试，待再次输入密码验证
+- recovery 里没有 keystore2 守护进程，CE 解密由 Skyward 自己按上面的链路完成
+- 解密失败时 UI 弹窗文字被截断（显示不全），需要检查弹窗布局
 
 ### 8.4 振动
 
