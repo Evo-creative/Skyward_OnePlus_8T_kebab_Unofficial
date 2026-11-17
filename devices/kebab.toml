@@ -81,7 +81,17 @@ modules = []
 writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
 interface = "wlan0"
 supplicant = "/vendor/bin/hw/wpa_supplicant"
-libraries = ["/vendor/lib64", "/system/lib64"]
+# The supplicant is a vendor program that loads the installed system's
+# platform libraries, which a recovery's own folders do not hold: the
+# linker's bootstrap folder is searched last for the few that live only
+# there.
+libraries = [
+  "/vendor/lib64",
+  "/mnt/system/system/lib64",
+  "/mnt/system/system_ext/lib64",
+  "/system/lib64",
+  "/mnt/system/system/lib64/bootstrap",
+]
 service = "android.hardware.wifi.supplicant.ISupplicant/default"
 probe = "http://connectivitycheck.gstatic.com/generate_204"
 

@@ -14,7 +14,7 @@ use skyward_net::wlan::{self, Joined, Link, Next, Power, Stage, Traffic, Wlan};
 use skyward_sys::worker::{self, Teller};
 use std::fs;
 use std::net::Ipv4Addr;
-use std::os::fd::RawFd;
+use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command as Process, Stdio};
@@ -26,6 +26,12 @@ use std::time::{Duration, Instant};
 /// The first folder the firmware loader looks in that a recovery can
 /// write.
 const FIRMWARE: &str = "/etc/firmware";
+
+/// The folder init keeps the sockets it hands programs in, and the name the
+/// WLAN driver knows its global control interface by: the supplicant checks
+/// that the socket it is handed is this one.
+const SOCKET_DIR: &str = "/dev/socket";
+const GLOBAL: &str = "wpa_wlan0";
 
 /// Where a partition a firmware file is read from is mounted meanwhile.
 const PARTITIONS: &str = "/skyward/wlan";
@@ -639,9 +645,15 @@ impl Station {
 }
 
 /// Bring the WLAN up as the pages do, for trying it out on its own: the
-/// driver loaded, the chip calibrated, and the interface up.
-pub fn bring_up_for(cfg: &Config, modules: &[PathBuf]) -> Result<()> {
-    bring_up(cfg, modules)
+/// driver loaded, the chip calibrated, the interface up, and the
+/// supplicant answering on its control socket.
+pub fn probe(cfg: &Config, modules: &[PathBuf], libraries: Option<&Path>) -> Result<()> {
+    bring_up(cfg, modules)?;
+    println!("{} is up", cfg.interface);
+    let mut child = start_supplicant(cfg, libraries)?;
+    println!("the supplicant answers on {}", Path::new(HOME).join("sockets").join(&cfg.interface).display());
+    end(&mut child, None);
+    Ok(())
 }
 
 /// Load the driver where its interface is not there yet, and bring the
@@ -691,6 +703,35 @@ fn daemon_folder() -> Result<()> {
         fs::set_permissions(path, fs::Permissions::from_mode(0o770)).with_context(|| format!("open {path} to the daemon"))?;
     }
     Ok(())
+}
+
+/// Make the socket the supplicant is handed as its global control
+/// interface, as the phone's own init makes it: a datagram socket at the
+/// path the supplicant checks the name against, owned by the user it runs
+/// as.
+fn global_socket() -> Result<OwnedFd> {
+    use std::os::fd::FromRawFd;
+    let dir = Path::new(SOCKET_DIR);
+    fs::create_dir_all(dir).with_context(|| format!("make {}", dir.display()))?;
+    let path = dir.join(GLOBAL);
+    let _ = fs::remove_file(&path);
+    let fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_DGRAM, 0) };
+    ensure!(fd >= 0, "make the supplicant's socket: {}", std::io::Error::last_os_error());
+    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+    let bytes = path.as_os_str().as_encoded_bytes();
+    let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    ensure!(bytes.len() < addr.sun_path.len(), "{} is too long for a socket's name", path.display());
+    for (at, b) in bytes.iter().enumerate() {
+        addr.sun_path[at] = *b as libc::c_char;
+    }
+    let len = std::mem::size_of::<libc::sa_family_t>() + bytes.len() + 1;
+    if unsafe { libc::bind(fd.as_raw_fd(), (&addr as *const libc::sockaddr_un).cast(), len as libc::socklen_t) } != 0 {
+        return Err(std::io::Error::last_os_error()).with_context(|| format!("bind {}", path.display()));
+    }
+    let _ = std::os::unix::fs::chown(&path, Some(WIFI), Some(WIFI));
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o660)).with_context(|| format!("open {} to the supplicant", path.display()))?;
+    Ok(fd)
 }
 
 /// Turn the driver on through the switch the phone's own supplicant uses,
@@ -744,21 +785,31 @@ fn start_supplicant(cfg: &Config, libraries: Option<&Path>) -> Result<Child> {
     if let Some(dir) = libraries {
         path.push(dir.to_string_lossy().into_owned());
     }
+    // The global control interface, which the phone's own init makes and
+    // hands over by number, is what lets this supplicant, which carries the
+    // phone's own service, take an interface at all.
+    let global = global_socket()?;
     let mut child = Process::new(&cfg.supplicant)
-        .args(["-i", &cfg.interface, "-D", "nl80211", "-c"])
+        // The phone's own service forks into the background first, which is
+        // also what lets it take the interface before it registers the
+        // service it answers the phone's own system on.
+        .args(["-B", "-dd", "-i", &cfg.interface, "-D", "nl80211", "-c"])
         .arg(&settings)
+        .arg(format!("-O{}", sockets.display()))
+        .arg(format!("-g@android:{GLOBAL}"))
+        .env("ANDROID_SOCKET_wpa_wlan0", global.as_raw_fd().to_string())
         .env("LD_LIBRARY_PATH", path.join(":"))
         .current_dir("/")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .with_context(|| format!("start {}", cfg.supplicant))?;
+    // It forked into the background as it started, so the one started is
+    // soon gone: what answers is the one it left behind, and the socket is
+    // the sign of it.
     let until = Instant::now() + SOCKET_WAIT;
     while !socket.exists() {
-        if let Some(status) = child.try_wait().context("look at wpa_supplicant")? {
-            bail!("wpa_supplicant ended as it started: {status}");
-        }
         if Instant::now() >= until {
             end(&mut child, None);
             bail!("wpa_supplicant opened no control socket in {} seconds", SOCKET_WAIT.as_secs());

@@ -405,9 +405,8 @@ fn main() -> Result<()> {
             let cfg = DeviceConfig::load(&config)?;
             let wlan = cfg.wlan.as_ref().context("the configuration describes no WLAN")?;
             let modules = cfg.modules.sources.iter().map(|s| skyward_modules::source_dir(s)).collect::<Result<Vec<_>>>()?;
-            wlan::bring_up_for(wlan, &modules)?;
-            println!("{} is up", wlan.interface);
-            Ok(())
+            let libraries = secure::libraries().unwrap_or(None);
+            wlan::probe(wlan, &modules, libraries.as_deref())
         }
         #[cfg(target_os = "android")]
         Cmd::Gatekeeper => {
