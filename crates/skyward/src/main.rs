@@ -387,13 +387,6 @@ fn main() -> Result<()> {
             println!("{} by {}", hw.name, hw.author);
             if let Some(key) = key {
                 let stored = skyward_crypto::keystore::StoredKey::load(&key)?;
-                let blob = stored.hardware_blob().context("this key is wrapped by a secret, and none was given")?;
-                let app_id = stored.app_id(&[]);
-                println!("the key service says of the blob: {}", service.characteristics(blob, &app_id)?);
-                let note = skyward_crypto::token::Token { challenge: 0, user: 0, authenticator: 0, kind: 0, when: 0, mac: Vec::new() };
-                let _ = note;
-                service.selftest(&app_id)?;
-                service.probe_begin(blob, &app_id, &[0u8; 12]);
                 let raw = stored.unwrap(skyward_crypto::keystore::Unwrap::Hardware(&service))?;
                 println!("{} holds a key of {} bytes", key.display(), raw.len());
             }

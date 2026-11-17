@@ -217,6 +217,9 @@ impl<'a> KeyMint<'a> {
     /// something that looks like a key. A key guarded by a screen lock
     /// takes the note the secure world wrote when it was answered.
     pub fn gcm_decrypt(&self, key_blob: &[u8], app_id: &[u8], nonce: &[u8], body: &[u8], note: Option<&Token>) -> Result<Vec<u8>> {
+        // A key out of the store Android keeps carries the prefix its
+        // keystore puts before a blob, which the service does not take.
+        let key_blob = crate::keystore::without_prefix(key_blob);
         let operation = match self.begin(key_blob, app_id, nonce, note) {
             Ok(operation) => operation,
             Err(e) if status::refused_with(&e) == Some(KEY_REQUIRES_UPGRADE) => {

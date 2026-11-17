@@ -30,9 +30,14 @@ const INSTANCE: &str = "default";
 const DECLARED_IN: &str = INTERFACE_40;
 
 /// The methods this client uses, as this layout numbers them: the hardware
-/// one, exporting a storage key, and the four steps of a decryption.
+/// one, exporting a storage key, renewing one, and the four steps of a
+/// decryption.
 const GET_HARDWARE_INFO: u32 = 1;
 const EXPORT_KEY: u32 = 10;
+const UPGRADE_KEY: u32 = 12;
+
+/// What the service says of a key the firmware running now has moved past.
+const KEY_REQUIRES_UPGRADE: i32 = -62;
 
 /// What the phone says about its key hardware, as this layout says it: how
 /// well protected it is, its name and who wrote it.
@@ -115,10 +120,40 @@ impl<'a> Keymaster<'a> {
     /// was made for, so a wrong secret fails here rather than yielding
     /// something that looks like a key.
     pub fn gcm_decrypt(&self, key_blob: &[u8], app_id: &[u8], nonce: &[u8], body: &[u8], note: Option<&crate::token::Token>) -> Result<Vec<u8>> {
-        let operation = self.begin(key_blob, app_id, nonce, note)?;
+        // A key out of the store Android keeps carries the prefix its
+        // keystore puts before a blob, which the service does not take.
+        let key_blob = crate::keystore::without_prefix(key_blob);
+        let operation = match self.begin(key_blob, app_id, nonce, note) {
+            Ok(operation) => operation,
+            // The firmware has moved on since this key was made. Renewing it
+            // gives the same key in the form the firmware running now reads;
+            // what is on disk is left as it is, so reading a key here
+            // changes nothing of the phone's own.
+            Err(e) if e.downcast_ref::<Refused>().is_some_and(|r| r.0 == KEY_REQUIRES_UPGRADE) => {
+                let renewed = self.upgrade(key_blob, app_id, nonce).context("renew the key for the firmware running now")?;
+                self.begin(&renewed, app_id, nonce, note)?
+            }
+            Err(e) => return Err(e),
+        };
         let mut out = self.update(operation, body)?;
         out.extend_from_slice(&self.finish(operation)?);
         Ok(out)
+    }
+
+    /// Renew a key for the firmware running now, giving the blob that keeps
+    /// it. The key on disk is left as it is; what comes back is the same key
+    /// in the form this firmware reads.
+    pub fn upgrade(&self, key_blob: &[u8], app_id: &[u8], nonce: &[u8]) -> Result<Vec<u8>> {
+        let what = "renew the key for the firmware running now";
+        let mut call = Message::call(DECLARED_IN);
+        call.bytes(key_blob);
+        let params = gcm_params(app_id, nonce);
+        call.structures(params.data, PARAMETER_BYTES, params.pointed);
+        let reply = self.device.transact(UPGRADE_KEY, &call).context(what)?;
+        let mut read = Answer::new(reply.bytes());
+        read.status().context(what)?;
+        refused(read.i32().context(what)?, what)?;
+        Ok(read.bytes().context(what)?.to_vec())
     }
 
     /// Whether the secure world will unwrap the key at all: a decryption is
@@ -201,11 +236,22 @@ impl<'a> Keymaster<'a> {
 
 /// What the service says of the work: a number that is nothing when it
 /// went through, and the layout's own name for what stopped it.
-fn refused(said: i32, what: &str) -> Result<()> {
-    if said != 0 {
-        bail!("the key service refused {what} with its code {said}");
+#[derive(Debug)]
+struct Refused(i32);
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "the key service refused the work with its code {}", self.0)
     }
-    Ok(())
+}
+
+impl std::error::Error for Refused {}
+
+fn refused(said: i32, what: &str) -> Result<()> {
+    match said {
+        0 => Ok(()),
+        _ => Err(anyhow::Error::new(Refused(said)).context(format!("refuse {what}"))),
+    }
 }
 
 /// The note the secure world wrote when the user answered their screen lock,
@@ -281,7 +327,6 @@ const PURPOSE_DECRYPT: u32 = 1;
 const BLOCK_MODE_GCM: u32 = 32;
 const PADDING_NONE: u32 = 1;
 
-const TAG_PURPOSE: i32 = 536_870_913;
 const TAG_BLOCK_MODE: i32 = 536_870_916;
 const TAG_PADDING: i32 = 536_870_918;
 const TAG_MAC_LENGTH: i32 = 805_307_371;

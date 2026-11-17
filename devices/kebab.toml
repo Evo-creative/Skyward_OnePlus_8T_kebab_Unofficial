@@ -27,6 +27,15 @@ load = []
 [partitions]
 mounted = ["persist"]
 
+# The phone goes into the crash dump, and from there its bootloader's
+# emergency download mode, once its screen goes dark: neither the kernel's
+# s2idle suspend nor the panel coming back from rest is reliable here yet.
+# So the pages keep the screen lit and the phone awake, and the settings
+# page's screen-off choice has no effect.
+[power]
+blank = false
+suspend = false
+
 # The modem partition holds the firmware the phone's drivers ask for, at
 # /vendor/firmware_mnt on the phone.
 [firmware]
@@ -37,6 +46,25 @@ partition = "modem"
 # the chip up and wlan0 appears. The chip's settings and MAC address are
 # on the persist partition, which the driver reads there itself, and on the
 # odm partition's wifi folder.
+#
+# The phone's own programs come first: the QMI name service the firmware's
+# service is found through, and the daemon that carries the calibration and
+# the MAC address between the firmware and the modem. Neither runs by
+# itself in a recovery, and without them the firmware never reports ready.
+# Neither is started for now: driving the firmware through them ends in a
+# CNSS_ASSERT in the secure world, and the phone's bootloader's emergency
+# download mode. WLAN is left for later, when that is understood.
+#
+# [[service]]
+# path = "/vendor/bin/qrtr-ns"
+#
+# [[service]]
+# path = "/vendor/bin/cnss-daemon"
+# args = ["-n"]
+# user = "system"
+# groups = ["system", "inet", "net_admin", "wifi"]
+# capabilities = ["NET_ADMIN"]
+
 [wlan]
 modules = []
 writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]

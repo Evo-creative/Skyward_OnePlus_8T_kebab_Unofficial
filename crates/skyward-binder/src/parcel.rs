@@ -1,11 +1,24 @@
 use anyhow::{bail, Context, Result};
 
-/// The mark libbinder writes into every call header. Both ends have to agree
-/// on it: it tells apart the copies of libbinder a phone carries, one built
-/// for the system, one for the vendor partition and one for a recovery. The
-/// services a recovery calls are the system's, so it is theirs that is
-/// written.
-const HEADER: i32 = i32::from_be_bytes(*b"SYST");
+/// The mark libbinder writes into every call header. Both ends have to
+/// agree on it: it tells apart the copies of libbinder a phone carries, one
+/// built for the system, one for the vendor partition and one for a
+/// recovery. The directory a recovery's own services register with is the
+/// recovery's, so that is the mark it is called with, and the system's mark
+/// is used where this program runs under the phone's own system instead.
+fn header() -> i32 {
+    /// Where the configuration the recovery ramdisk carries is, which is
+    /// not there under the phone's own system.
+    const RAMDISK: &str = "/skyward/device.toml";
+    header_for(std::path::Path::new(RAMDISK).exists())
+}
+
+fn header_for(recovery: bool) -> i32 {
+    match recovery {
+        true => i32::from_be_bytes(*b"RECO"),
+        false => i32::from_be_bytes(*b"SYST"),
+    }
+}
 
 /// Strict mode gathers violations rather than acting on them; a caller with
 /// no policy of its own still sets that bit.
@@ -59,7 +72,7 @@ pub(crate) fn head(interface: &str) -> Vec<u8> {
     let mut p = Parcel::default();
     p.i32(STRICT_MODE_PENALTY_GATHER);
     p.i32(UNSET_WORK_SOURCE);
-    p.i32(HEADER);
+    p.i32(header());
     p.string(interface);
     p.data
 }
@@ -324,9 +337,15 @@ mod tests {
         let mut r = Reader::new(p.bytes());
         assert_eq!(r.i32().unwrap(), i32::MIN, "strict mode gathers");
         assert_eq!(r.i32().unwrap(), -1, "no work source");
-        assert_eq!(r.i32().unwrap(), 0x5359_5354, "the system's mark, SYST");
+        assert_eq!(r.i32().unwrap(), header(), "the mark of the libbinder the directory was built from");
         assert_eq!(r.string().unwrap(), "a.b.IC");
         assert_eq!(r.here(), p.bytes().len(), "the header is all of it");
+    }
+
+    #[test]
+    fn the_mark_of_a_call_is_the_recovery_s_or_the_system_s() {
+        assert_eq!(header_for(true), 0x5245_434f, "a recovery's mark, RECO");
+        assert_eq!(header_for(false), 0x5359_5354, "the system's mark, SYST");
     }
 
     #[test]
