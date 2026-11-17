@@ -417,6 +417,28 @@ fastboot boot /tmp/opencode/skyward-kebab.img
 > 它会调用 `hdd_driver_load()` → `cnss_wlan_register_driver()`，
 > 并在冷启动校准进行中时等待校准完成再探测芯片。之前只「打开」了这个设备节点，没有写 `ON`。
 >
+> **当前卡点（2026-11-18 深夜）**：`wpa_supplicant` 启动后，在
+> `AServiceManager_addService` 注册 `android.hardware.wifi.supplicant.ISupplicant/default`
+> 时失败，`wpas_aidl_init` 返回 NULL → `wpa_supplicant_run` 返回 -1 →
+> 进程退出 255，并把自己刚建好的控制 socket 一起删掉（日志里能看到
+> `AIDL Interface version: 5` 之后 3ms 就 `Deiniting aidl control`）。
+>
+> 已为此做的准备（都已提交）：
+> - `/dev/vndbinder` 指向 binderfs 的节点（`secure.rs`），并启动手机自己的
+>   `/vendor/bin/vndservicemanager`
+> - 等 `cnss-daemon` 起来再写 `fs_ready`（`f017f63`）
+> - supplicant 用 `-B` 启动（先加接口、后注册 AIDL），并按 init 的方式造
+>   `/dev/socket/wpa_wlan0` 把 fd 传给它（`7824807`）
+>
+> 仍失败的注册调用看不到错误（manager 不打印、NDK 只返回非 OK）。两个可行方案：
+> 1. **在 Skyward 里实现一个最小的 vendor 服务目录**（作为 `/dev/vndbinder` 的
+>    context manager，对 `addService` 直接回 OK）——不需要额外产物，但要给
+>    `skyward-binder` 加 `BINDER_SET_CONTEXT_MGR` 与服务端回复
+> 2. **LD_PRELOAD 一个 shim** 覆盖 `AServiceManager_addService` 返回 0——省事，
+>    但要在 ramdisk 里多一个 .so，且是掩盖而非解决
+>
+> 注意：即使 supplicant 起来，扫描/连接/DHCP 还没验证。
+>
 > 复现步骤（本次启动只写一次 `fs_ready`）：
 >
 > ```sh
