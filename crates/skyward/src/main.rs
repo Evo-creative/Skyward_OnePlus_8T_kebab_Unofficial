@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 #[cfg(target_os = "android")]
 mod backup;
 #[cfg(target_os = "android")]
+mod crash;
 mod decrypt;
 #[cfg(target_os = "android")]
 mod filework;
@@ -770,6 +771,13 @@ fn recovery() -> Result<()> {
         std::fs::set_permissions(skyward_sys::RUN, std::fs::Permissions::from_mode(0o755))
             .with_context(|| format!("open {} to the recovery's other users", skyward_sys::RUN))?;
         skyward_sys::keep_log(Path::new(skyward_sys::LOG))?;
+        // What the kernel wrote before it stopped, if this start came after
+        // one: kept where the next start, and a computer, can read it.
+        match crash::keep() {
+            Ok(Some(at)) => skyward_sys::kmsg(&format!("the start before left the kernel's own record in {}", at.display()))?,
+            Ok(None) => {}
+            Err(e) => skyward_sys::kmsg(&format!("the kernel's record of the start before was not kept: {e:#}"))?,
+        }
         // A recovery that ended with a function of its own in the port took
         // the port with it; going through "none" takes that function off.
         if skyward_sys::prop("sys.usb.state").is_some_and(|s| s != "adb") {
