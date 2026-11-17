@@ -919,11 +919,21 @@ fn chip(t: &Theme, (cx, cy, r): (f32, f32, f32)) -> (Canvas, i32, i32) {
 pub fn toast(c: &mut Canvas, t: &Theme, f: &Fonts, text: &str) {
     let m = &t.m;
     let px = m.sub_px;
-    let w = c.text_width(&f.heading, text, px) + m.dp(40.0);
-    let h = m.dp(44.0);
-    let (x, y) = ((m.w as f32 - w) / 2.0, m.h as f32 - m.dp(120.0));
-    c.fill_round_rect(x, y, w, h, h / 2.0, Rgba::rgb(30, 30, 30).with_alpha(235));
-    c.text_center(&f.heading, text, m.w as f32 / 2.0, y + h / 2.0, px, Rgba::rgb(255, 255, 255));
+    // What the words may take beside the pill's own margin. A message that
+    // does not fit the screen, as why a key did not open often does not,
+    // goes on to the next line rather than past the edge.
+    let room = m.w as f32 - m.margin * 2.0 - m.dp(40.0);
+    let lines = wrap(c, &f.heading, text, px, room);
+    let widest = lines.iter().map(|line| c.text_width(&f.heading, line, px)).fold(0.0, f32::max);
+    let w = (widest + m.dp(40.0)).min(m.w as f32 - m.margin * 2.0);
+    let pitch = m.sub_pitch;
+    let h = (lines.len() as f32 - 1.0) * pitch + m.dp(44.0);
+    let (x, y) = ((m.w as f32 - w) / 2.0, m.h as f32 - m.dp(120.0) - (h - m.dp(44.0)));
+    c.fill_round_rect(x, y, w, h, m.dp(22.0), Rgba::rgb(30, 30, 30).with_alpha(235));
+    let first = y + (h - (lines.len() as f32 - 1.0) * pitch) / 2.0;
+    for (k, line) in lines.iter().enumerate() {
+        c.text_center(&f.heading, line, m.w as f32 / 2.0, first + k as f32 * pitch, px, Rgba::rgb(255, 255, 255));
+    }
 }
 
 /// The home page's search bar in `r`, at `level` of its strength, without
@@ -3067,6 +3077,22 @@ mod tests {
         assert!(holes(&battery(&t, &f, 100, false, right, cy)) > 60, "the digits show the page through");
         assert_eq!(holes(&battery(&t, &f, 100, true, right, cy)), 0, "white digits over green");
         assert_eq!(holes(&battery(&t, &f, 15, false, right, cy)), 0, "white digits over red");
+    }
+
+    #[test]
+    fn a_message_too_long_for_the_screen_goes_on_to_more_lines() {
+        let f = crate::font::bundled();
+        let t = Theme::dark(1200, 2608, 3.0);
+        let m = &t.m;
+        let c = Canvas::new(1, 1);
+        let text = "open what the secure world holds the user's blob closed with: \
+                    the key service refused start a decryption with its code -33";
+        let room = m.w as f32 - m.margin * 2.0 - m.dp(40.0);
+        let lines = wrap(&c, &f.heading, text, m.sub_px, room);
+        assert!(lines.len() > 1, "the message takes more than one line");
+        for line in &lines {
+            assert!(c.text_width(&f.heading, line, m.sub_px) <= room, "{line:?} stays within the screen");
+        }
     }
 
     #[test]
