@@ -134,7 +134,7 @@ pub fn confirm_label(which: Confirm, s: &State) -> (&'static str, bool) {
         Confirm::RunScript => (INSTALL, true),
         Confirm::Merge => (["滑动以合并", "滑動以合併", "Slide to merge"], true),
         Confirm::Relabel => (["滑动以修复", "滑動以修復", "Slide to fix"], true),
-        Confirm::CloseData => (["滑动以关闭", "滑動以關閉", "Slide to close"], true),
+        Confirm::CloseData => (["滑动以卸载 data 分区", "滑動以卸載 data 分割區", "Slide to unmount data"], true),
         Confirm::SwitchSystem => (["滑动以切换并重启", "滑動以切換並重新啟動", "Slide to switch and reboot"], false),
         Confirm::RemoveSystem => (["滑动以删除", "滑動以刪除", "Slide to remove"], true),
         Confirm::InstallSystem => (INSTALL, false),
@@ -714,7 +714,7 @@ pub fn decrypt(cx: &Ctx) -> Frame {
             cx,
             c,
             Icon::Lock,
-            l.pick(["正在关闭 data 分区", "正在關閉 data 分割區", "Closing the data partition"]),
+            l.pick(["正在卸载 data 分区", "正在卸載 data 分割區", "Unmounting the data partition"]),
             Some(l.pick(["请稍候", "請稍候", "One moment"])),
             None,
         ),
@@ -759,9 +759,9 @@ fn data_status_of(cx: &Ctx, mut c: Canvas, icon: Icon, title: &str, note: Option
         // A way to let go of the partition again, under what it holds: the
         // swipe that closes it, and what stops working once it is.
         let note = l.pick([
-            "关闭后，内部存储、文件管理与 MTP 都将不可用；随时可以重新解密。",
-            "關閉後，內部儲存空間、檔案管理與 MTP 都將無法使用；隨時可以重新解密。",
-            "Once closed, internal storage, file manager and MTP are gone until it is decrypted again.",
+            "卸载后，内部存储、文件管理与 MTP 都将不可用；随时可以重新解密。",
+            "卸載後，內部儲存空間、檔案管理與 MTP 都將無法使用；隨時可以重新解密。",
+            "Once unmounted, internal storage, file manager and MTP are gone until it is decrypted again.",
         ]);
         let y = widgets::footnote(&mut c, t, f, sign_cy + m.dp(150.0), note);
         let (label, danger) = confirm_label(Confirm::CloseData, cx.state);

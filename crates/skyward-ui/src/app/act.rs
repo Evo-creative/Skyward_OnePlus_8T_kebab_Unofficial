@@ -783,10 +783,10 @@ impl App {
             Confirm::CloseData => match self.state.data {
                 Data::Open => fx.extend(self.close_data()),
                 Data::Locked { .. } => self.say(
-                    l.pick(["请先完成解锁，再关闭 data 分区", "請先完成解鎖，再關閉 data 分割區", "Finish unlocking, then close the data partition"]),
+                    l.pick(["请先完成解锁，再卸载 data 分区", "請先完成解鎖，再卸載 data 分割區", "Finish unlocking, then unmount data"]),
                     now,
                 ),
-                Data::Closing => self.say(l.pick(["data 分区正在关闭", "data 分割區正在關閉", "The data partition is being closed"]), now),
+                Data::Closing => self.say(l.pick(["data 分区正在卸载", "data 分割區正在卸載", "The data partition is being unmounted"]), now),
                 Data::Opening => self.say(l.pick(DATA_OPENING), now),
                 Data::Erased => self.say(l.pick(DATA_ERASED), now),
                 Data::Closed | Data::Failed(_) => self.say(l.pick(DECRYPT_FIRST), now),
@@ -794,7 +794,7 @@ impl App {
             Confirm::Relabel => match self.state.data {
                 Data::Open | Data::Locked { .. } => fx.push(Effect::Relabel),
                 Data::Opening => self.say(l.pick(DATA_OPENING), now),
-                Data::Closing => self.say(l.pick(["data 分区正在关闭", "data 分割區正在關閉", "The data partition is being closed"]), now),
+                Data::Closing => self.say(l.pick(["data 分区正在卸载", "data 分割區正在卸載", "The data partition is being unmounted"]), now),
                 Data::Erased => self.say(l.pick(DATA_ERASED), now),
                 Data::Closed | Data::Failed(_) => {
                     self.say(l.pick(["请先在「解密」中打开 data 分区", "請先在「解密」中開啟 data 分割區", "Open the data partition in Decrypt first"]), now)

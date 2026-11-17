@@ -2885,9 +2885,9 @@ impl Pages<'_> {
                 self.app.state.lang.pick(DATA_OPENING)
             } else {
                 self.app.state.lang.pick([
-                    "其它工作正在进行，请稍后再关闭 data 分区",
-                    "其它工作正在進行，請稍後再關閉 data 分割區",
-                    "Other work is under way. Close the data partition shortly.",
+                    "其它工作正在进行，请稍后再卸载 data 分区",
+                    "其它工作正在進行，請稍後再卸載 data 分割區",
+                    "Other work is under way. Unmount the data partition shortly.",
                 ])
             };
             self.app.report(why, now);

@@ -476,7 +476,7 @@ pub fn update_value(l: Lang, s: &Standing) -> &'static str {
 pub fn data(l: Lang, d: &Data) -> &'static str {
     l.pick(match d {
         Data::Closed | Data::Opening | Data::Failed(_) => ["未挂载", "未掛載", "Not mounted"],
-        Data::Closing => ["正在关闭", "正在關閉", "Closing"],
+        Data::Closing => ["正在卸载", "正在卸載", "Unmounting"],
         Data::Locked { .. } => ["未解密", "未解密", "Locked"],
         Data::Open => ["已解密", "已解密", "Decrypted"],
         Data::Erased => ["已清除", "已清除", "Wiped"],

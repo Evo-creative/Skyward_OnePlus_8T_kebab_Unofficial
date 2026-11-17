@@ -754,12 +754,14 @@ kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。�
    注意 MTP 只有在 data 分区打开后才提供内部存储（`storage_open()`），否则电脑只看到设备、看不到存储；
    首页「文件传输」下方的脚注已写明这一点
 3. **暂不实测**：备份/恢复、刷写、fastbootd、槽位切换 —— 按用户要求先记着，代码路径都在，不做逐项实机验证
-4. **待办：UI 加「关闭 data 分区」**（用户 2026-11-18 提出，先记着，未实现）
-   - 现状：只有底层 `wipe::release_data()`（结束占用进程 → 卸载 `/data`、`/sdcard` → `data::close()` 移除 dm 映射），
-     以及 CLI `skyward data --close`；自动用于擦除、格式化/修复文件系统、安装/更新前
-   - 计划：解密页在 data 打开时显示「关闭 data 分区」+ 滑动确认；
-     关闭前先 `withhold` 收回 MTP 的内部存储，关闭后状态回到 `Data::Closed`，文件管理与 MTP 一并失效
-   - 其它可选位置：挂载页单列一栏
+4. ~~UI 加「卸载 data 分区」~~ 已完成（`1cb4975`，2026-11-18）
+   - 解密页在 data 打开时显示说明与「滑动以卸载 data 分区」；安装、擦除、备份、
+     文件操作、修复、第二系统等任一进行中时入口隐藏
+   - 执行：先 `withhold` 收回 MTP 的内部存储，再在 worker 里调
+     `wipe::release_data()`（结束占用进程 → 卸载 `/data`、`/sdcard` → `data::close()` 移除 dm 映射）；
+     成功后状态回到 `Data::Closed`，文件管理与 MTP 一并失效，可随时重新解密
+   - 底层与 CLI 早已存在：`wipe::release_data()`、`skyward data --close`，
+     自动用于擦除、格式化/修复文件系统、安装/更新前
 4. ~~Keymaster 4.x HIDL 客户端~~ 已完成（`bfe5a64` 起，见 8.3）
 5. ~~LED 振动后端~~ 已完成（见 8.4）
 6. ~~字体子集化~~ 已完成
