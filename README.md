@@ -14,8 +14,8 @@ Skyward is a recovery written in Rust, from scratch.
 
 ## Building for the OnePlus 8T (kebab)
 
-This fork builds Skyward for the OnePlus 8T (kebab), on the stock recovery of the
-LineageOS 24.0 package for this phone. What was tried and what broke is in
+This fork builds Skyward for the OnePlus 8T (kebab), on the recovery the phone
+already has. What was tried and what broke is in
 [docs/kebab-port.md](docs/kebab-port.md).
 
 Against Skyward, this port adds a Keymaster 4.x HIDL client (kebab has no KeyMint
@@ -31,8 +31,29 @@ Wi-Fi, Skyward's online update and dual boot.
 | Not implemented | Wi-Fi (the supplicant's vendor AIDL service will not register), vibration waveforms |
 | Not possible | dual boot (no `init_boot`); Skyward's online update for a third-party port |
 
-Build with `cache/recovery.img` from the LineageOS 24.0 kebab zip. Verified boot
-must be off, and only the recovery partition is written:
+### Flashing
+
+Take the phone's own recovery first, once, before Skyward is flashed: after that
+the recovery partition holds Skyward, and this file is also the way back.
+
+```sh
+adb shell 'dd if=/dev/block/by-name/recovery_a of=/tmp/recovery.img'
+adb pull /tmp/recovery.img cache/recovery.img
+```
+
+Then flash the image built below. Verified boot must be off, only the recovery
+partition is written, and the bootloader stays unlocked:
+
+```sh
+adb reboot bootloader
+fastboot flash recovery cache/skyward-kebab-100.img
+fastboot reboot recovery
+```
+
+### Building
+
+Needs the Rust that `rust-toolchain.toml` names with its `aarch64-linux-android`
+target, Android NDK r29, and [cargo-ndk](https://github.com/bbqsrc/cargo-ndk).
 
 ```sh
 cargo ndk -t arm64-v8a --platform 30 build --release -p skyward
@@ -46,13 +67,10 @@ target/release/skyward-pack recovery --stock cache/recovery.img \
   --mono resources/fonts/KirkMono-Regular.ttf \
   --mono-license resources/fonts/KirkMono-OFL.txt \
   --size 104857600 --out cache/skyward-kebab-100.img
-adb reboot bootloader
-fastboot flash recovery cache/skyward-kebab-100.img
-fastboot reboot recovery
 ```
 
-Do not lock the bootloader. The details, including getting out of EDL, are in
-[docs/kebab-port.md](docs/kebab-port.md).
+The system-init program is built although kebab cannot hold a second system,
+because the packer takes it.
 
 ## Features
 

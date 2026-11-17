@@ -14,7 +14,7 @@ Skyward 是使用 Rust 编写的 recovery，从零开始编写。
 
 ## 为 OnePlus 8T（kebab）构建
 
-这个分支为 OnePlus 8T（kebab）构建 Skyward，原厂 recovery 取自本机的 LineageOS 24.0 包。过程与踩坑见 [docs/kebab-port.md](docs/kebab-port.md)。
+这个分支用手机里原有的 recovery 为 OnePlus 8T（kebab）构建 Skyward。过程与踩坑见 [docs/kebab-port.md](docs/kebab-port.md)。
 
 与 Skyward 相比，这个移植多了：Keymaster 4.x HIDL 客户端（kebab 没有 KeyMint AIDL）、boot header v2、AW8697 的 LED 振动后端、注册 DRM 恢复事件（显示提交失败不再 panic 进 EDL）、解密页卸载 data 分区、状态栏时钟避开前摄开孔。少了：Wi-Fi、Skyward 在线更新、双系统。
 
@@ -25,7 +25,26 @@ Skyward 是使用 Rust 编写的 recovery，从零开始编写。
 | 未实现 | Wi-Fi（supplicant 的 vendor AIDL 服务注册不上）、振动波形 |
 | 实现不了 | 双系统（没有 `init_boot`）；第三方移植的 Skyward 在线更新 |
 
-构建与刷入（`cache/recovery.img` 取自 LineageOS 24.0 kebab 包；必须先关闭验证，只写 recovery 分区）：
+### 刷入
+
+第一次刷入 Skyward 之前，先把手机原来的 recovery 取出来（之后就变成 Skyward 了）；这份镜像也是刷回去用的：
+
+```sh
+adb shell 'dd if=/dev/block/by-name/recovery_a of=/tmp/recovery.img'
+adb pull /tmp/recovery.img cache/recovery.img
+```
+
+然后刷入下面构建出的镜像。先关闭验证，只写 recovery 分区，不要锁 bootloader：
+
+```sh
+adb reboot bootloader
+fastboot flash recovery cache/skyward-kebab-100.img
+fastboot reboot recovery
+```
+
+### 构建
+
+需要 `rust-toolchain.toml` 指定版本的 Rust 及其 `aarch64-linux-android` 目标、Android NDK r29 和 [cargo-ndk](https://github.com/bbqsrc/cargo-ndk)。
 
 ```sh
 cargo ndk -t arm64-v8a --platform 30 build --release -p skyward
@@ -39,12 +58,9 @@ target/release/skyward-pack recovery --stock cache/recovery.img \
   --mono resources/fonts/KirkMono-Regular.ttf \
   --mono-license resources/fonts/KirkMono-OFL.txt \
   --size 104857600 --out cache/skyward-kebab-100.img
-adb reboot bootloader
-fastboot flash recovery cache/skyward-kebab-100.img
-fastboot reboot recovery
 ```
 
-不要锁定 bootloader；详细步骤、恢复与 EDL 处理见 [docs/kebab-port.md](docs/kebab-port.md)。
+虽然 kebab 装不了第二系统，打包器仍需要 system-init，所以照常构建。
 
 ## 功能
 
