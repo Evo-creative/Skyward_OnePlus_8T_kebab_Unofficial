@@ -780,9 +780,21 @@ impl App {
             Confirm::DeleteEntry => fx.push(Effect::Delete(self.entry_path())),
             // The partition has to be open; whether its users have unlocked
             // their own files makes no difference.
+            Confirm::CloseData => match self.state.data {
+                Data::Open => fx.extend(self.close_data()),
+                Data::Locked { .. } => self.say(
+                    l.pick(["请先完成解锁，再关闭 data 分区", "請先完成解鎖，再關閉 data 分割區", "Finish unlocking, then close the data partition"]),
+                    now,
+                ),
+                Data::Closing => self.say(l.pick(["data 分区正在关闭", "data 分割區正在關閉", "The data partition is being closed"]), now),
+                Data::Opening => self.say(l.pick(DATA_OPENING), now),
+                Data::Erased => self.say(l.pick(DATA_ERASED), now),
+                Data::Closed | Data::Failed(_) => self.say(l.pick(DECRYPT_FIRST), now),
+            },
             Confirm::Relabel => match self.state.data {
                 Data::Open | Data::Locked { .. } => fx.push(Effect::Relabel),
                 Data::Opening => self.say(l.pick(DATA_OPENING), now),
+                Data::Closing => self.say(l.pick(["data 分区正在关闭", "data 分割區正在關閉", "The data partition is being closed"]), now),
                 Data::Erased => self.say(l.pick(DATA_ERASED), now),
                 Data::Closed | Data::Failed(_) => {
                     self.say(l.pick(["请先在「解密」中打开 data 分区", "請先在「解密」中開啟 data 分割區", "Open the data partition in Decrypt first"]), now)

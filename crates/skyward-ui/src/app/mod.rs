@@ -214,6 +214,9 @@ pub enum Confirm {
     /// Give the data partition's files the SELinux labels the installed
     /// system's rules give them.
     Relabel,
+    /// Close the data partition, as a partition that is open can be closed
+    /// again: what reads it stops, and it is left as it is.
+    CloseData,
     /// Do to the partition the filesystem page shows what it chose.
     Filesystem,
     /// Switch to the system picked on the systems page, and restart into
@@ -532,6 +535,9 @@ pub enum Effect {
     /// [`App::relabel_started`], [`App::relabel_progress`] and
     /// [`App::relabel_ended`].
     Relabel,
+    /// Close the data partition again: what reads it stops and it is left
+    /// as it is, telling how it went with [`App::data_closed`].
+    CloseData,
     /// Stop giving the data partition's files their labels.
     StopRelabel,
     /// Read the partitions for the filesystem page, which has just opened,

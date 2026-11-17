@@ -2381,6 +2381,15 @@ impl Pages<'_> {
                 skyward_sys::kmsg(&format!("what was entered did not open the user's files: {why}"))?;
                 self.app.unlock_failed(why, now);
             }
+            decrypt::Ended::Closed(Ok(())) => {
+                skyward_sys::kmsg("the data partition is closed again")?;
+                self.closed.clear();
+                self.app.data_closed(Ok(()), now);
+            }
+            decrypt::Ended::Closed(Err(why)) => {
+                skyward_sys::kmsg(&format!("the data partition stays open: {why}"))?;
+                self.app.data_closed(Err(why), now);
+            }
         }
         // Screenshots taken while internal storage was closed go into
         // the gallery's once it opens.
@@ -2588,6 +2597,7 @@ impl Pages<'_> {
                 let job = decrypt::Job::Unlock { closed: self.closed.clone(), user, credential: code.into_bytes() };
                 self.decryptor = Some(Decryptor::start(job)?);
             }
+            Effect::CloseData => self.close_data(now)?,
             Effect::ReadDir(folder) => list(&mut self.app, folder)?,
             Effect::ReadPlace(place, folder) => list_place(&mut self.app, place, folder)?,
             Effect::Paste { op, path, into, clash } => self.paste(op, path, into, clash, now)?,
@@ -2854,6 +2864,40 @@ impl Pages<'_> {
         };
         self.worker = Some(filework::Worker::start(task)?);
         self.app.file_job_started(shown);
+        Ok(())
+    }
+
+    /// Close the data partition again, as the decrypt page asked: every
+    /// program that reads it ends, file transfer lets internal storage go
+    /// first, and the partition is left as it is.
+    fn close_data(&mut self, now: u64) -> Result<()> {
+        // The page hides the way while any of this runs; a request that
+        // still arrives is told to wait rather than cut the work off.
+        let busy = self.installer.is_some()
+            || self.eraser.is_some()
+            || self.backuper.is_some()
+            || self.part_worker.is_some()
+            || self.worker.is_some()
+            || self.relabeler.is_some()
+            || self.systems_worker.is_some();
+        if busy || self.decryptor.is_some() {
+            let why = if self.decryptor.is_some() {
+                self.app.state.lang.pick(DATA_OPENING)
+            } else {
+                self.app.state.lang.pick([
+                    "其它工作正在进行，请稍后再关闭 data 分区",
+                    "其它工作正在進行，請稍後再關閉 data 分割區",
+                    "Other work is under way. Close the data partition shortly.",
+                ])
+            };
+            self.app.report(why, now);
+            return Ok(());
+        }
+        if !withhold(&mut self.transfer, &mut self.app, now)? {
+            return Ok(());
+        }
+        skyward_sys::kmsg("closing the data partition, as the decrypt page asked")?;
+        self.decryptor = Some(Decryptor::start(decrypt::Job::Close)?);
         Ok(())
     }
 

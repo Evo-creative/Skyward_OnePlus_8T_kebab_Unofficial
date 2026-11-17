@@ -36,6 +36,8 @@ pub enum Data {
     Locked { user: u32, keys: Keys, checking: bool },
     /// Open, every user's own files with it.
     Open,
+    /// Being closed again: what reads it stops, and it is left as it is.
+    Closing,
     /// Not opened, and why.
     Failed(String),
     /// Erased whole: nothing opens until the system makes it afresh, as it
@@ -77,6 +79,27 @@ impl App {
 
     /// What the user entered did not open their own files: the page asks
     /// again and says why.
+    /// Close the partition again, the decrypt page saying so meanwhile.
+    pub(super) fn close_data(&mut self) -> Vec<Effect> {
+        self.state.data = Data::Closing;
+        self.refresh();
+        vec![Effect::CloseData]
+    }
+
+    /// The partition is closed again, or could not be.
+    pub fn data_closed(&mut self, ended: std::result::Result<(), String>, now: u64) {
+        match ended {
+            Ok(()) => self.state.data = Data::Closed,
+            // It is left as it was, open, so the way to close it stays
+            // there to be tried again; the page says what kept it.
+            Err(why) => {
+                self.state.data = Data::Open;
+                self.report(&why, now);
+            }
+        }
+        self.refresh();
+    }
+
     pub fn unlock_failed(&mut self, why: String, now: u64) {
         if let Data::Locked { checking, .. } = &mut self.state.data {
             *checking = false;
@@ -251,6 +274,50 @@ mod tests {
         let fx = app.touch(Touch::Up, &f, 0);
         assert!(fx.is_empty());
         assert_eq!(app.deadline(0), Some(TOAST_MS), "the page says how many dots it takes");
+    }
+
+    #[test]
+    fn an_open_partition_is_closed_with_a_swipe_and_not_before() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Decrypt, W, H, PPD);
+        app.arrive();
+        app.data_waiting(None);
+        assert_eq!(app.state.data, Data::Open);
+        assert!(tap(&mut app, &f, &i, Action::Confirm(Confirm::CloseData)).is_empty(), "a tap does not close it");
+        assert_eq!(app.deadline(0), Some(TOAST_MS), "the page asks for the swipe");
+        assert_eq!(app.state.data, Data::Open);
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::CloseData), vec![Effect::CloseData]);
+        assert_eq!(app.state.data, Data::Closing);
+        assert!(
+            app.frame(&f, &i).hits.iter().all(|h| h.action != Action::Confirm(Confirm::CloseData)),
+            "nothing more is taken while it is closed"
+        );
+        app.data_closed(Ok(()), 0);
+        assert_eq!(app.state.data, Data::Closed);
+    }
+
+    #[test]
+    fn a_partition_that_closed_is_opened_again_by_coming_back_to_the_page() {
+        let (f, i) = (fonts(), info());
+        let mut app = opened(Screen::Decrypt, &f, &i);
+        app.data_waiting(None);
+        swipe(&mut app, &f, &i, Confirm::CloseData);
+        app.data_closed(Ok(()), 0);
+        tap_back(&mut app, &f, &i, 0);
+        assert_eq!(tap(&mut app, &f, &i, Action::Open(Screen::Decrypt)), vec![Effect::OpenData]);
+        assert_eq!(app.state.data, Data::Opening);
+    }
+
+    #[test]
+    fn a_partition_that_did_not_close_stays_open_and_says_why() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Decrypt, W, H, PPD);
+        app.arrive();
+        app.data_waiting(None);
+        swipe(&mut app, &f, &i, Confirm::CloseData);
+        app.data_closed(Err("the data partition is still in use".into()), 0);
+        assert_eq!(app.state.data, Data::Open);
+        assert_eq!(app.deadline(0), Some(TOAST_MS), "with why");
     }
 
     #[test]

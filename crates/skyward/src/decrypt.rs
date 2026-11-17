@@ -14,12 +14,15 @@ pub enum Job {
     /// Open the own files of `user` with what they entered at their screen
     /// lock; `closed` are the users whose own files are still closed.
     Unlock { closed: Vec<Closed>, user: u32, credential: Vec<u8> },
+    /// Close the partition again, once nothing reads it.
+    Close,
 }
 
 /// How a job ended: what it opened, or why it did not.
 pub enum Ended {
     Opened(Result<Opening, String>),
     Unlocked(Result<Vec<Closed>, String>),
+    Closed(Result<(), String>),
 }
 
 /// A job done on a thread of its own, which the screen lets go once the
@@ -37,6 +40,7 @@ impl Decryptor {
                 Job::Unlock { closed, user, credential } => {
                     Ended::Unlocked(with_key_service(|service| data::unlock(service, &closed, user, &credential)))
                 }
+                Job::Close => Ended::Closed(crate::wipe::release_data().map_err(|e| format!("{e:#}"))),
             });
         })?;
         Ok(Decryptor { worker })
