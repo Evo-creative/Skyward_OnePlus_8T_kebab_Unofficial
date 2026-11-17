@@ -627,8 +627,10 @@ kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。�
    - 找出不依赖 wifi HAL 的触发方式（ioctl / sysfs / 驱动注册时序）
    - 上机时**每次启动只写一次 `fs_ready`**，且 `cnss-daemon` 以 system 用户 + 正确组启动
    - 相关服务目前已在 `devices/kebab.toml` 注释掉，避免 `CNSS_ASSERT` → EDL
-2. **复测 MTP**：重新打开 File transfer，确认 `e017082` 生效（上次只验证了关闭后 adb 恢复）
-3. **验证备份/恢复**、刷写、fastbootd、槽位切换（代码路径都通，缺 kebab 实机确认）
+2. **复测 MTP**：重新打开 File transfer，确认 `e017082` 生效（上次只验证了关闭后 adb 恢复）。
+   注意 MTP 只有在 data 分区打开后才提供内部存储（`storage_open()`），否则电脑只看到设备、看不到存储；
+   首页「文件传输」下方的脚注已写明这一点
+3. **暂不实测**：备份/恢复、刷写、fastbootd、槽位切换 —— 按用户要求先记着，代码路径都在，不做逐项实机验证
 4. ~~Keymaster 4.x HIDL 客户端~~ 已完成（`bfe5a64` 起，见 8.3）
 5. ~~LED 振动后端~~ 已完成（见 8.4）
 6. ~~字体子集化~~ 已完成
