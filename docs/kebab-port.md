@@ -132,6 +132,8 @@ DRM modes        1080x2400x60x183357x0cmd
 DT 背光          qcom,mdss-dsi-bl-normal-max-level = 0x7ff (2047)
                  qcom,mdss-dsi-bl-max-level        = 0x7ff
 backlight        panel0-backlight, max_brightness = 2047
+前摄开孔         左上角，压住状态栏时钟的位置；`[display] status_inset = 10`
+                 把时钟右移一个数字（`997ef50`）
 ```
 
 ### 3.2 触摸
@@ -252,6 +254,7 @@ KirkMono-Regular.ttf   264 KB / 142 KB
 | `041ec38`/`df28d48` | 文案改为「卸载」；代码标识统一为 `umount`（对照 `mount::umount`） |
 | `689854d` | 卸载后显示「data 分区未挂载」与「解密 data 分区」按钮，不再误显示为正在读取锁屏 |
 | `a1ffc1a`/`f8aa253` | 长按删除清空输入框；同时试过的「点变密 + 省略号」已按用户要求回滚 |
+| `997ef50` | `[display] status_inset`：状态栏时钟避开前摄开孔；重启前先把刚改的设置写盘 |
 
 ### 4.1 为什么需要 boot header v2
 
@@ -273,7 +276,8 @@ v2 布局多了 `recovery_dtbo` 与 `dtb`，只按 v3 重建会丢掉它们。
 
 ```toml
 [device]  codename = "kebab", brand = "OnePlus", model = "OnePlus 8T", ab = true
-[display] width = 1080, height = 2400, density = 450, diagonal = 6.55, corner_radius = 24
+[display] width = 1080, height = 2400, density = 450, diagonal = 6.55
+          corner_radius = 24, status_inset = 10   # 避开左上角前摄开孔
 [modules] sources = ["vendor"], load = []       # 无 vendor_boot/vendor_dlkm；驱动基本内建
 [partitions] mounted = ["persist"]
 [haptics] led = "/sys/class/leds/vibrator"      # AW8697；见 §8.4
@@ -769,6 +773,8 @@ kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。�
 - ~~Keymaster 4.x HIDL 客户端~~ 已完成（`bfe5a64` 起，见 §8.3）。
 - ~~LED 振动后端~~ 已完成（见 §8.4）。
 - ~~字体子集化~~ 已完成（见 §3.6）。
+- ~~状态栏时钟被前摄开孔遮住~~ 已完成（`997ef50`）：kebab 配置 `status_inset = 10`，时钟右移一个数字。
+- 设置改动在重启前会立即写盘，不再等 2 秒防抖。
 
 ### 9.2 待上机复查（已实现，未最终确认）
 
