@@ -54,13 +54,29 @@ struct Leave {
 pub struct Sleeper {
     leave: Arc<(Mutex<Leave>, Condvar)>,
     told: Told<Slept>,
+    /// Whether the phone may suspend at all.
+    suspends: bool,
 }
 
 impl Sleeper {
     pub fn start() -> Result<Sleeper> {
+        Self::make(true)
+    }
+
+    /// A sleeper that never suspends the phone: the screen's loop still lets
+    /// it, and nothing happens, for a phone whose kernel does not come back
+    /// from a suspend in a recovery.
+    pub fn awake() -> Result<Sleeper> {
+        Self::make(false)
+    }
+
+    fn make(suspends: bool) -> Result<Sleeper> {
         fs::write(MEM_SLEEP, "s2idle").with_context(|| format!("write s2idle to {MEM_SLEEP}"))?;
         let (tell, told) = worker::telling().context("make the sleeper's wake pipe")?;
         let leave = Arc::new((Mutex::new(Leave { allowed: false, not_before: Instant::now() }), Condvar::new()));
+        if !suspends {
+            return Ok(Sleeper { leave, told, suspends });
+        }
         let shared = leave.clone();
         thread::Builder::new()
             .name("sleeper".into())
@@ -98,7 +114,7 @@ impl Sleeper {
                 }
             })
             .context("start the sleeper")?;
-        Ok(Sleeper { leave, told })
+        Ok(Sleeper { leave, told, suspends })
     }
 
     /// Readable while sleeps wait to be told.
@@ -109,6 +125,9 @@ impl Sleeper {
     /// Let the phone sleep, or keep it awake. Let, the thread suspends it as
     /// soon as the kernel will, and after the sleep waits to be let again.
     pub fn allow(&self, allowed: bool) {
+        if !self.suspends {
+            return;
+        }
         let (lock, cvar) = &*self.leave;
         let mut l = lock.lock().expect("the sleeper's leave is not held by a thread that panicked");
         if l.allowed != allowed {

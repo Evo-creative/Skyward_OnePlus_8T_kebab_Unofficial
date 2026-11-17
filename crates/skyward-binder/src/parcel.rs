@@ -1,9 +1,11 @@
 use anyhow::{bail, Context, Result};
 
 /// The mark libbinder writes into every call header. Both ends have to agree
-/// on it: it tells apart the copies of libbinder a phone carries, and the one
-/// the recovery's own programs are built from is the recovery copy.
-const HEADER: i32 = i32::from_be_bytes(*b"RECO");
+/// on it: it tells apart the copies of libbinder a phone carries, one built
+/// for the system, one for the vendor partition and one for a recovery. The
+/// services a recovery calls are the system's, so it is theirs that is
+/// written.
+const HEADER: i32 = i32::from_be_bytes(*b"SYST");
 
 /// Strict mode gathers violations rather than acting on them; a caller with
 /// no policy of its own still sets that bit.
@@ -49,6 +51,19 @@ pub trait Payload {
     }
 }
 
+/// The head every call opens with, whichever layout the service speaks:
+/// the strict mode the caller passes on, the work source it has none of,
+/// the mark of the libbinder it was built with, and then the name of the
+/// interface it is for, as a count of UTF-16 units and those units.
+pub(crate) fn head(interface: &str) -> Vec<u8> {
+    let mut p = Parcel::default();
+    p.i32(STRICT_MODE_PENALTY_GATHER);
+    p.i32(UNSET_WORK_SOURCE);
+    p.i32(HEADER);
+    p.string(interface);
+    p.data
+}
+
 /// The bytes of a call or its reply, in the layout libbinder reads: values
 /// little-endian, each one padded out to four bytes.
 #[derive(Default)]
@@ -74,10 +89,7 @@ impl Parcel {
     /// it looks at anything the method itself takes.
     pub fn call(interface: &str) -> Parcel {
         let mut p = Parcel::default();
-        p.i32(STRICT_MODE_PENALTY_GATHER);
-        p.i32(UNSET_WORK_SOURCE);
-        p.i32(HEADER);
-        p.string(interface);
+        p.data = head(interface);
         p
     }
 
@@ -312,7 +324,7 @@ mod tests {
         let mut r = Reader::new(p.bytes());
         assert_eq!(r.i32().unwrap(), i32::MIN, "strict mode gathers");
         assert_eq!(r.i32().unwrap(), -1, "no work source");
-        assert_eq!(r.i32().unwrap(), 0x5245_434f, "the recovery's mark, RECO");
+        assert_eq!(r.i32().unwrap(), 0x5359_5354, "the system's mark, SYST");
         assert_eq!(r.string().unwrap(), "a.b.IC");
         assert_eq!(r.here(), p.bytes().len(), "the header is all of it");
     }

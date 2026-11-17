@@ -5,10 +5,14 @@
 //! that number.
 //!
 //! The calls and answers serve the phone's own driver and the host tests.
+#![cfg_attr(not(target_os = "android"), allow(dead_code))]
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
+#[cfg(target_os = "android")]
 use skyward_binder::hidl::{self, Answer, Message};
 
+#[cfg(target_os = "android")]
+use anyhow::Context;
 #[cfg(target_os = "android")]
 use skyward_binder::driver::{Binder, Handle};
 
@@ -18,6 +22,12 @@ pub const INTERFACE_41: &str = "android.hardware.keymaster@4.1::IKeymasterDevice
 pub const INTERFACE_40: &str = "android.hardware.keymaster@4.0::IKeymasterDevice";
 
 const INSTANCE: &str = "default";
+
+/// Every method this client calls is declared in the older of the two
+/// layouts, and a service of the newer one dispatches it through the older
+/// one's own code, which checks the call against the older name. A call
+/// made with the newer name is turned away before its method runs.
+const DECLARED_IN: &str = INTERFACE_40;
 
 /// The methods this client uses, as this layout numbers them: the hardware
 /// one, exporting a storage key, and the four steps of a decryption.
@@ -67,30 +77,33 @@ impl<'a> Keymaster<'a> {
 
     /// What the service says about the hardware it runs on.
     pub fn hardware(&self) -> Result<Hardware> {
-        let call = Message::call(self.interface);
-        let reply = self.device.transact(GET_HARDWARE_INFO, &call).context("ask the key service about its hardware")?;
+        let what = "ask the key service about its hardware";
+        let call = Message::call(DECLARED_IN);
+        let reply = self.device.transact(GET_HARDWARE_INFO, &call).context(what)?;
         let mut read = Answer::new(reply.bytes());
-        read.status().context("ask the key service about its hardware")?;
-        let answer = read.pointed().context("read what the key service said about its hardware")?;
-        read_hardware(answer)
+        read.status().context(what)?;
+        let security_level = read.i32().context(what)? as u32;
+        let name = read.string().context(what)?;
+        let author = read.string().context(what)?;
+        Ok(Hardware { security_level, name, author })
     }
 
     /// The key itself, unwrapped from the form a storage key is kept in.
     /// Android's own keystore does this for vold by exporting the key in the
     /// raw form, which is what a storage key is for.
     pub fn ephemeral_storage_key(&self, key_blob: &[u8]) -> Result<Vec<u8>> {
-        let mut call = Message::call(self.interface);
+        let mut call = Message::call(DECLARED_IN);
         // The raw form, which the phone's own key format numbers first.
         call.u32(0);
         call.bytes(key_blob);
         call.bytes(&[]);
         call.bytes(&[]);
-        let reply = self.device.transact(EXPORT_KEY, &call).context("export the storage key")?;
+        let what = "export the storage key";
+        let reply = self.device.transact(EXPORT_KEY, &call).context(what)?;
         let mut read = Answer::new(reply.bytes());
-        read.status().context("export the storage key")?;
-        let answer = read.pointed().context("read the storage key")?;
-        refused(answer, "export the storage key")?;
-        Ok(run_in(answer, 8).context("read the storage key")?.to_vec())
+        read.status().context(what)?;
+        refused(read.i32().context(what)?, what)?;
+        Ok(read.bytes().context(what)?.to_vec())
     }
 
     /// Undo an AES-GCM encryption the key service did with `key_blob`. The
@@ -112,89 +125,79 @@ impl<'a> Keymaster<'a> {
         self.abort(operation)
     }
 
-    /// The parameters an AES-GCM decryption is opened with.
-    fn gcm_params(app_id: &[u8], nonce: &[u8]) -> Params {
-        let mut params = Params::default();
-        params.enumeration(TAG_BLOCK_MODE, BLOCK_MODE_GCM);
-        params.enumeration(TAG_PADDING, PADDING_NONE);
-        params.integer(TAG_MAC_LENGTH, 128);
-        if !app_id.is_empty() {
-            params.blob(TAG_APPLICATION_ID, app_id.to_vec());
-        }
-        params.blob(TAG_NONCE, nonce.to_vec());
-        params.enumeration(TAG_PURPOSE, PURPOSE_DECRYPT);
-        params
-    }
-
     /// Open a decryption and give the number the service knows it by.
     fn begin(&self, key_blob: &[u8], app_id: &[u8], nonce: &[u8], note: Option<&crate::token::Token>) -> Result<u64> {
-        let mut call = Message::call(self.interface);
+        let mut call = Message::call(DECLARED_IN);
         call.u32(PURPOSE_DECRYPT);
         call.bytes(key_blob);
-        let params = Self::gcm_params(app_id, nonce);
+        let params = gcm_params(app_id, nonce);
         call.structures(params.data, PARAMETER_BYTES, params.pointed);
         let (token, mac) = auth_token(note);
         call.structure(token, mac);
-        let reply = self.device.transact(BEGIN, &call).context("start a decryption")?;
+        let what = "start a decryption";
+        let reply = self.device.transact(BEGIN, &call).context(what)?;
         let mut read = Answer::new(reply.bytes());
-        read.status().context("start a decryption")?;
-        let answer = read.pointed().context("read what the key service answered")?;
-        refused(answer, "start a decryption")?;
-        if answer.len() < 32 {
-            bail!("the key service answered {} bytes to a decryption", answer.len());
-        }
-        Ok(u64::from_le_bytes(answer[24..32].try_into().expect("eight bytes")))
+        read.status().context(what)?;
+        refused(read.i32().context(what)?, what)?;
+        // The parameters the operation takes in, which a decryption leaves
+        // as they were, and then the number the service knows it by.
+        read.bytes().context(what)?;
+        read.u64().context(what)
     }
 
     fn update(&self, operation: u64, input: &[u8]) -> Result<Vec<u8>> {
-        let mut call = Message::call(self.interface);
+        let mut call = Message::call(DECLARED_IN);
         call.u64(operation);
         call.structures(Vec::new(), PARAMETER_BYTES, Vec::new());
         call.bytes(input);
-        call.structure(vec![0u8; AUTH_TOKEN_BYTES], Vec::new());
-        call.structure(vec![0u8; VERIFICATION_TOKEN_BYTES], Vec::new());
-        let reply = self.device.transact(UPDATE, &call).context("feed the decryption")?;
+        call.structure(vec![0u8; AUTH_TOKEN_BYTES], vec![(TOKEN_MAC, Vec::new())]);
+        let (verification, inside) = empty_verification_token();
+        call.structure(verification, inside);
+        let what = "feed the decryption";
+        let reply = self.device.transact(UPDATE, &call).context(what)?;
         let mut read = Answer::new(reply.bytes());
-        read.status().context("feed the decryption")?;
-        let answer = read.pointed().context("read what the decryption gave back")?;
-        refused(answer, "feed the decryption")?;
-        Ok(run_in(answer, 24).context("read what the decryption gave back")?.to_vec())
+        read.status().context(what)?;
+        refused(read.i32().context(what)?, what)?;
+        read.i32().context(what)?;
+        // The parameters the operation took in, which a decryption leaves
+        // as it found them, and then what it gave back.
+        read.bytes().context(what)?;
+        Ok(read.bytes().context(what)?.to_vec())
     }
 
     fn finish(&self, operation: u64) -> Result<Vec<u8>> {
-        let mut call = Message::call(self.interface);
+        let mut call = Message::call(DECLARED_IN);
         call.u64(operation);
         call.structures(Vec::new(), PARAMETER_BYTES, Vec::new());
         call.bytes(&[]);
         call.bytes(&[]);
-        call.structure(vec![0u8; AUTH_TOKEN_BYTES], Vec::new());
-        call.structure(vec![0u8; VERIFICATION_TOKEN_BYTES], Vec::new());
-        let reply = self.device.transact(FINISH, &call).context("close the decryption")?;
+        call.structure(vec![0u8; AUTH_TOKEN_BYTES], vec![(TOKEN_MAC, Vec::new())]);
+        let (verification, inside) = empty_verification_token();
+        call.structure(verification, inside);
+        let what = "close the decryption, which is where a wrong key is refused";
+        let reply = self.device.transact(FINISH, &call).context(what)?;
         let mut read = Answer::new(reply.bytes());
-        read.status().context("close the decryption")?;
-        let answer = read.pointed().context("read what the decryption ended with")?;
-        refused(answer, "close the decryption, which is where a wrong key is refused")?;
-        Ok(run_in(answer, 24).context("read what the decryption ended with")?.to_vec())
+        read.status().context(what)?;
+        refused(read.i32().context(what)?, what)?;
+        // The parameters the operation took in, then what it gave back.
+        read.bytes().context(what)?;
+        Ok(read.bytes().context(what)?.to_vec())
     }
 
     fn abort(&self, operation: u64) -> Result<()> {
-        let mut call = Message::call(self.interface);
+        let mut call = Message::call(DECLARED_IN);
         call.u64(operation);
-        let reply = self.device.transact(ABORT, &call).context("drop the decryption")?;
+        let what = "drop the decryption";
+        let reply = self.device.transact(ABORT, &call).context(what)?;
         let mut read = Answer::new(reply.bytes());
-        read.status().context("drop the decryption")?;
-        let answer = read.pointed().context("read what dropping the decryption said")?;
-        refused(answer, "drop the decryption")
+        read.status().context(what)?;
+        refused(read.i32().context(what)?, what)
     }
 }
 
-/// What a returning structure says of the work: a number that is nothing
-/// when it went through, and the layout's own name for what stopped it.
-fn refused(answer: &[u8], what: &str) -> Result<()> {
-    if answer.len() < 4 {
-        bail!("the key service answered {} bytes to {what}", answer.len());
-    }
-    let said = i32::from_le_bytes(answer[0..4].try_into().expect("four bytes"));
+/// What the service says of the work: a number that is nothing when it
+/// went through, and the layout's own name for what stopped it.
+fn refused(said: i32, what: &str) -> Result<()> {
     if said != 0 {
         bail!("the key service refused {what} with its code {said}");
     }
@@ -204,10 +207,11 @@ fn refused(answer: &[u8], what: &str) -> Result<()> {
 /// The note the secure world wrote when the user answered their screen lock,
 /// as this layout carries it: who it was for, what they did, when, and the
 /// mark the secure world checks it by. A key that is not guarded by a lock
-/// takes a token of nothing.
+/// takes a token of nothing. The mark is a run of bytes inside the note,
+/// and the service looks for it even when it holds nothing.
 fn auth_token(note: Option<&crate::token::Token>) -> (Vec<u8>, Vec<(usize, Vec<u8>)>) {
     let mut token = vec![0u8; AUTH_TOKEN_BYTES];
-    let Some(note) = note else { return (token, Vec::new()) };
+    let Some(note) = note else { return (token, vec![(TOKEN_MAC, Vec::new())]) };
     token[0..8].copy_from_slice(&(note.challenge as u64).to_le_bytes());
     token[8..16].copy_from_slice(&(note.user as u64).to_le_bytes());
     token[16..24].copy_from_slice(&(note.authenticator as u64).to_le_bytes());
@@ -215,28 +219,23 @@ fn auth_token(note: Option<&crate::token::Token>) -> (Vec<u8>, Vec<(usize, Vec<u
     token[32..40].copy_from_slice(&(note.when as u64).to_le_bytes());
     // The mark sits at the end of the token as a run of bytes.
     token[48..52].copy_from_slice(&(note.mac.len() as u32).to_le_bytes());
-    (token, vec![(40, note.mac.clone())])
+    (token, vec![(TOKEN_MAC, note.mac.clone())])
 }
 
-/// The returning structure as the phone's own libraries hold it: the
-/// security level, then the name and the author as runs of text.
-fn read_hardware(answer: &[u8]) -> Result<Hardware> {
-    if answer.len() < 40 {
-        bail!("the key service answered {} bytes about its hardware", answer.len());
+
+
+/// The parameters an AES-GCM decryption is opened with.
+fn gcm_params(app_id: &[u8], nonce: &[u8]) -> Params {
+    let mut params = Params::default();
+    params.enumeration(TAG_BLOCK_MODE, BLOCK_MODE_GCM);
+    params.enumeration(TAG_PADDING, PADDING_NONE);
+    params.integer(TAG_MAC_LENGTH, 128);
+    if !app_id.is_empty() {
+        params.blob(TAG_APPLICATION_ID, app_id.to_vec());
     }
-    let security_level = u32::from_le_bytes(answer[0..4].try_into().expect("four bytes"));
-    let name = text_in(answer, 8).context("read the key service's name")?;
-    let author = text_in(answer, 24).context("read the key service's author")?;
-    Ok(Hardware { security_level, name, author })
+    params.blob(TAG_NONCE, nonce.to_vec());
+    params
 }
-
-/// The text a returning structure holds at `offset`: its address, how long
-/// it is, and the terminator the length leaves out.
-fn text_in(structure: &[u8], offset: usize) -> Result<String> {
-    let run = run_in(structure, offset)?;
-    Ok(String::from_utf8_lossy(run.split(|b| *b == 0).next().unwrap_or(run)).into_owned())
-}
-
 
 /// The methods this client uses, as this layout numbers them.
 const BEGIN: u32 = 16;
@@ -244,20 +243,35 @@ const UPDATE: u32 = 17;
 const FINISH: u32 = 18;
 const ABORT: u32 = 19;
 
-/// How large one `KeyParameter` is on the wire: the tag, the union's own
-/// tag, and the widest arm of the union.
+/// How large one `KeyParameter` is on the wire: its tag, the union of
+/// values, which numbers its own arm but has it chosen by the tag, and the
+/// run of bytes that sits beside the union rather than in it.
 const PARAMETER_BYTES: usize = 32;
-/// Which arm of a parameter's value is used.
-const ARM_ENUM: u32 = 0;
-const ARM_INTEGER: u32 = 1;
-const ARM_BLOB: u32 = 4;
+/// Where a parameter's value and its run of bytes sit in it: the union's
+/// own arm, its widest value, and then the run's address and how many
+/// bytes it holds.
+const PARAMETER_VALUE: usize = 8;
+const PARAMETER_BLOB: usize = 16;
+const PARAMETER_BLOB_LENGTH: usize = 24;
 
 /// How large the note the secure world wrote for a credential is on the
 /// wire, and the token that vouches for a decryption with it. Both are all
 /// zero when there is none, which is the case for every key of the phone's
 /// own, as the metadata key is.
 const AUTH_TOKEN_BYTES: usize = 56;
-const VERIFICATION_TOKEN_BYTES: usize = 40;
+const VERIFICATION_TOKEN_BYTES: usize = 56;
+
+/// Where the runs of bytes inside those notes sit: the mark a note ends
+/// with, and the parameters a verification vouched for, which comes before
+/// its own mark.
+const TOKEN_MAC: usize = 40;
+const VERIFICATION_PARAMETERS: usize = 16;
+
+/// A note that vouches for nothing: every value is nothing, and the runs
+/// inside it are empty, as the service looks for them all the same.
+fn empty_verification_token() -> (Vec<u8>, Vec<(usize, Vec<u8>)>) {
+    (vec![0u8; VERIFICATION_TOKEN_BYTES], vec![(VERIFICATION_PARAMETERS, Vec::new()), (TOKEN_MAC, Vec::new())])
+}
 
 const PURPOSE_DECRYPT: u32 = 1;
 const BLOCK_MODE_GCM: u32 = 32;
@@ -278,21 +292,29 @@ struct Params {
 }
 
 impl Params {
-    fn push(&mut self, tag: i32, arm: u32, value: u32) {
+    /// A parameter whose value is a number, which a purpose, a block mode,
+    /// a padding and a length are alike. Every parameter carries a run of
+    /// bytes after its value whether it uses one or not, and the service
+    /// reads that run for each in turn, so an empty one is still written.
+    fn value(&mut self, tag: i32, value: u32) {
+        let index = self.data.len() / PARAMETER_BYTES;
         let mut p = vec![0u8; PARAMETER_BYTES];
         p[0..4].copy_from_slice(&tag.to_le_bytes());
-        p[8..12].copy_from_slice(&arm.to_le_bytes());
-        p[16..20].copy_from_slice(&value.to_le_bytes());
+        // The union's own arm is left at the one it starts with: the
+        // service reads the value the tag names, not the arm.
+        p[PARAMETER_VALUE..PARAMETER_VALUE + 4].copy_from_slice(&value.to_le_bytes());
         self.data.extend_from_slice(&p);
+        self.pointed.push((index, PARAMETER_BLOB, Vec::new()));
     }
 
     fn enumeration(&mut self, tag: i32, value: u32) {
-        self.push(tag, ARM_ENUM, value);
+        self.value(tag, value);
     }
 
     fn integer(&mut self, tag: i32, value: u32) {
-        self.push(tag, ARM_INTEGER, value);
+        self.value(tag, value);
     }
+
 
     /// A run of bytes: the arm says where it is, and how long it is, in the
     /// place its structure holds the run's own address frame.
@@ -300,33 +322,12 @@ impl Params {
         let index = self.data.len() / PARAMETER_BYTES;
         let mut p = vec![0u8; PARAMETER_BYTES];
         p[0..4].copy_from_slice(&tag.to_le_bytes());
-        p[8..12].copy_from_slice(&ARM_BLOB.to_le_bytes());
         // The run's frame: its address, how long it is, and that the reader
         // does not free it.
-        p[24..28].copy_from_slice(&(bytes.len() as u32).to_le_bytes());
+        p[PARAMETER_BLOB_LENGTH..PARAMETER_BLOB_LENGTH + 4].copy_from_slice(&(bytes.len() as u32).to_le_bytes());
         self.data.extend_from_slice(&p);
-        self.pointed.push((index, 16, bytes));
+        self.pointed.push((index, PARAMETER_BLOB, bytes));
     }
-}
-
-/// A run of bytes a returning structure points at, which the driver copied
-/// into this program's own room.
-fn run(at: u64, length: u32) -> &'static [u8] {
-    if at == 0 || length == 0 {
-        return &[];
-    }
-    unsafe { std::slice::from_raw_parts(at as *const u8, length as usize) }
-}
-
-/// The run a returning structure holds at `offset`: its address, then how
-/// long it is.
-fn run_in(structure: &[u8], offset: usize) -> Result<&'static [u8]> {
-    if structure.len() < offset + 16 {
-        bail!("the key service answered {} bytes, too few to hold a run at {offset}", structure.len());
-    }
-    let at = u64::from_le_bytes(structure[offset..offset + 8].try_into().expect("eight bytes"));
-    let length = u32::from_le_bytes(structure[offset + 8..offset + 12].try_into().expect("four bytes"));
-    Ok(run(at, length))
 }
 
 #[cfg(test)]
@@ -334,23 +335,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_hardware_answer_is_read_as_the_phone_lays_it_out() {
-        // The security level, then two runs of text, each an address and a
-        // length among the values.
-        let name = b"qti-keymaster\0";
-        let author = b"Qualcomm\0";
-        let mut answer = vec![0u8; 40];
-        answer[0..4].copy_from_slice(&1u32.to_le_bytes());
-        answer[8..16].copy_from_slice(&(name.as_ptr() as u64).to_le_bytes());
-        answer[16..20].copy_from_slice(&(name.len() as u32).to_le_bytes());
-        answer[24..32].copy_from_slice(&(author.as_ptr() as u64).to_le_bytes());
-        answer[32..36].copy_from_slice(&(author.len() as u32).to_le_bytes());
-        let h = read_hardware(&answer).unwrap();
-        assert_eq!(h, Hardware { security_level: 1, name: "qti-keymaster".into(), author: "Qualcomm".into() });
+    fn a_service_that_refused_the_work_is_an_error() {
+        assert!(refused(0, "export the storage key").is_ok());
+        assert!(refused(-30, "export the storage key").is_err(), "the layout's own name for a key that is gone");
     }
 
     #[test]
-    fn an_answer_too_short_to_hold_the_hardware_is_refused() {
-        assert!(read_hardware(&[0u8; 8]).is_err());
+    fn the_parameters_of_a_decryption_are_written_as_the_layout_lays_them_out() {
+        let params = gcm_params(b"app", &[1u8; 12]);
+        assert_eq!(params.data.len(), 5 * PARAMETER_BYTES, "mode, padding, length, identifier and nonce, never the purpose, which a decryption is opened with");
+        let first = &params.data[..PARAMETER_BYTES];
+        assert_eq!(i32::from_le_bytes(first[0..4].try_into().unwrap()), TAG_BLOCK_MODE);
+        assert_eq!(u32::from_le_bytes(first[PARAMETER_VALUE..PARAMETER_VALUE + 4].try_into().unwrap()), BLOCK_MODE_GCM);
+        assert_eq!(params.pointed.len(), 5, "every parameter carries a run, empty or not");
+        assert_eq!(params.pointed[0].1, PARAMETER_BLOB, "a run is named where the structure holds its address");
+        assert!(params.pointed[0].2.is_empty(), "a number's run holds nothing");
+        assert_eq!(params.pointed[3].2, b"app", "the identifier is kept for its address to point at");
     }
 }

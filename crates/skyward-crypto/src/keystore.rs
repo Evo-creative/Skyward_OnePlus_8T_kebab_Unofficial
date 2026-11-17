@@ -25,6 +25,20 @@ const FN_KEY_BLOB: &str = "keymaster_key_blob";
 const FN_SECDISCARDABLE: &str = "secdiscardable";
 const FN_STRETCHING: &str = "stretching";
 
+/// What keystore writes before a key blob it made, to say whether the key
+/// service or the software behind it holds the key, which the service
+/// itself does not take: a blob kept by Android before it wrote this
+/// carries none.
+const BLOB_MAGIC: &[u8] = b"pKMblob";
+const BLOB_PREFIX_BYTES: usize = 8;
+
+/// The key blob as the key service takes it, without what keystore wrote
+/// before it.
+fn without_prefix(blob: &[u8]) -> &[u8] {
+    let prefixed = blob.len() >= BLOB_PREFIX_BYTES && blob.starts_with(BLOB_MAGIC) && blob[BLOB_PREFIX_BYTES - 1] <= 1;
+    if prefixed { &blob[BLOB_PREFIX_BYTES..] } else { blob }
+}
+
 /// SHA-512 of `data` behind a fixed prefix.
 pub fn hash_with_prefix(prefix: &[u8], data: &[u8]) -> Vec<u8> {
     let mut padded = prefix.to_vec();
@@ -95,11 +109,17 @@ impl StoredKey {
     /// What the phone's key service says the wrapping key may be used for.
     #[cfg(target_os = "android")]
     pub fn authorizations(&self, service: &crate::keymint::KeyMint) -> Result<Vec<(i32, i64)>> {
-        let blob = self.key_blob.as_ref().context("this key is wrapped by a secret, not by the key service")?;
+        let blob = self.hardware_blob().context("this key is wrapped by a secret, not by the key service")?;
         service.authorizations(blob, &self.app_id(&[]))
     }
 
     /// The key itself.
+    /// The form the key service keeps the key in, for a key it holds itself,
+    /// as the service takes it.
+    pub fn hardware_blob(&self) -> Option<&[u8]> {
+        self.key_blob.as_deref().map(without_prefix)
+    }
+
     pub fn unwrap<K: Decryptor + ?Sized>(&self, how: Unwrap<K>) -> Result<Vec<u8>> {
         if self.encrypted.len() < NONCE_BYTES + TAG_BYTES {
             bail!("the wrapped key is {} bytes, too few to hold anything", self.encrypted.len());
@@ -108,8 +128,7 @@ impl StoredKey {
         match how {
             Unwrap::Hardware(service) => {
                 let blob = self
-                    .key_blob
-                    .as_ref()
+                    .hardware_blob()
                     .context("this key is wrapped by a secret, and none was given")?;
                 service.gcm_decrypt(blob, &self.app_id(&[]), nonce, body)
             }

@@ -70,6 +70,10 @@ pub struct DeviceConfig {
     /// boot actions.
     #[serde(default)]
     pub owners: Vec<Owners>,
+    /// What the phone does when nothing is touched: whether the screen goes
+    /// dark by itself, and whether the phone suspends while it is off.
+    #[serde(default)]
+    pub power: Power,
     #[serde(default)]
     pub wipe: Wipe,
     #[serde(default)]
@@ -185,6 +189,27 @@ pub struct Backup {
     /// A `*` stands for any one name.
     #[serde(default)]
     pub data_skipped: Vec<String>,
+}
+
+/// What the phone does when nothing is touched: whether the screen goes dark
+/// by itself, and whether the phone suspends while it is off. Both are on
+/// unless a phone's configuration turns them off, for a phone whose kernel
+/// does not come back from either in a recovery.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct Power {
+    /// Whether the screen dims and goes dark by itself once the settings'
+    /// time has passed with nothing touched.
+    pub blank: bool,
+    /// Whether the phone suspends once the screen is off, as its own system
+    /// does.
+    pub suspend: bool,
+}
+
+impl Default for Power {
+    fn default() -> Self {
+        Power { blank: true, suspend: true }
+    }
 }
 
 /// What erasing on the wipe page takes in beyond the places every Android

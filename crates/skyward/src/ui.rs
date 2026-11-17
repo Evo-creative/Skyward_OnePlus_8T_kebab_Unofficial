@@ -38,7 +38,7 @@ use skyward_ui::app::{
     App, Asked, BackupAt, BackupEnd, BackupEntry, BackupRefusal, ClashChoice, Data, DownloadEnd, Effect, EraseStop, FileKind, FileOp,
     FileRow, FileTask, FsAction, FsRow, Have, Held, ItemEnd, ItemState, JobEnd, Keys, MountFailure, Part, PartKind, PartStop, Place,
     RenameRefused, Screen, Shot, SkywardEnd, SkywardStage, Target, UsbDrive, UsbLink, Wipe, DATA_OPENING, DATA_PARTITION, DOWNLOADS,
-    INSTALL_UNFINISHED, USB_DRIVE,
+    INSTALL_UNFINISHED, SCREEN_OFF, USB_DRIVE,
 };
 use skyward_ui::settings::Keeper;
 use skyward_ui::surface::kms::KmsSurface;
@@ -1100,8 +1100,10 @@ fn job_end(end: filework::End) -> JobEnd {
 pub fn run(cfg: &DeviceConfig, programs: &[Service], font: &Path, mono: &Path, request: bcb::Request, start: Screen, dump: Option<&Path>) -> Result<()> {
     let mut pages = Pages::open(cfg, programs, font, mono, request, start, dump)?;
     pages.begin()?;
-    // The phone sleeps while its screen is off and nothing needs it awake.
-    let sleeper = Sleeper::start()?;
+    // The phone sleeps while its screen is off and nothing needs it awake,
+    // unless its configuration keeps it awake: a kernel that does not come
+    // back from a suspend in a recovery crashes instead.
+    let sleeper = if cfg.power.suspend { Sleeper::start()? } else { Sleeper::awake()? };
     // A uevent may be a charger or a computer attached or taken away: the
     // battery is read at once, and the phone stays awake until it is.
     let uevents = uevent::Listener::open()?;
@@ -1293,6 +1295,15 @@ impl<'a> Pages<'a> {
         let locale = request.locale.as_deref().or(info.locale.as_deref());
         let named = locale.map(Lang::for_locale).transpose()?;
         app.take_settings(kept.settings(), named);
+        // A phone whose panel does not come back from going dark keeps it
+        // lit, whatever the settings kept from the starts before say.
+        if !cfg.power.blank {
+            let never = SCREEN_OFF.iter().position(Option::is_none).expect("the settings offer a screen that stays on");
+            if app.state.screen_off != never {
+                app.state.screen_off = never;
+                skyward_sys::kmsg("the pages keep the screen lit: this phone's panel does not come back from going dark")?;
+            }
+        }
         let keeper = Keeper::new(&kept);
         skyward_sys::kmsg(&format!(
             "the pages speak {:?}, {}, and the locale named is {}",

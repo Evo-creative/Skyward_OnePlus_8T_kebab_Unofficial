@@ -45,7 +45,10 @@ pub struct Message {
 
 impl Message {
     /// A call to `interface`, opened with the name the far side checks
-    /// before it looks at anything the method itself takes.
+    /// before it looks at anything the method itself takes. The older
+    /// layout's own library writes this name as it is, terminated and
+    /// padded to a whole word, unlike the newer layout's count of UTF-16
+    /// units: it is a fork of the same code that kept the older way.
     pub fn call(interface: &str) -> Message {
         let mut m = Message::default();
         m.data.extend_from_slice(interface.as_bytes());
@@ -90,13 +93,13 @@ impl Message {
             let length = data.len();
             let at = self.keep(data);
             bytes[offset..offset + 8].copy_from_slice(&at.to_le_bytes());
-            inside.push((at, length));
+            inside.push((offset, at, length));
         }
         let length = bytes.len();
         let at = self.keep(bytes);
         let parent = self.address(at, length, None);
-        for (data_at, length) in inside {
-            self.address(data_at, length, Some(parent));
+        for (offset, data_at, length) in inside {
+            self.address(data_at, length, Some((parent, offset)));
         }
         parent
     }
@@ -111,7 +114,7 @@ impl Message {
             let at = self.keep(bytes);
             let field = index * size + offset;
             data[field..field + 8].copy_from_slice(&at.to_le_bytes());
-            inside.push((at, length));
+            inside.push((field, at, length));
         }
         let count = if size == 0 { 0 } else { data.len() / size };
         let length = data.len();
@@ -124,9 +127,9 @@ impl Message {
         frame.extend_from_slice(&[0; 4]);
         let frame_at = self.keep(frame);
         let parent = self.address(frame_at, FRAME_BYTES, None);
-        let run = self.address(at, length, Some(parent));
-        for (data_at, length) in inside {
-            self.address(data_at, length, Some(run));
+        let run = self.address(at, length, Some((parent, 0)));
+        for (field, data_at, length) in inside {
+            self.address(data_at, length, Some((run, field)));
         }
         parent
     }
@@ -149,22 +152,24 @@ impl Message {
         frame.extend_from_slice(&[0; 4]);
         let frame_at = self.keep(frame);
         let parent = self.address(frame_at, FRAME_BYTES, None);
-        self.address(at, length, Some(parent));
+        self.address(at, length, Some((parent, 0)));
     }
 
     /// Write an address among the values and say where it sits, which is
-    /// how the driver finds it. The answer is which address this is, for
-    /// the one pointing inside it to name.
-    fn address(&mut self, at: u64, length: usize, inside: Option<usize>) -> usize {
+    /// how the driver finds it. `inside` names the address this one sits
+    /// in and where among its bytes the driver puts this one: the field of
+    /// a structure, or the first field of a run's frame. The answer is
+    /// which address this is, for the ones inside it to name.
+    fn address(&mut self, at: u64, length: usize, inside: Option<(usize, usize)>) -> usize {
         let which = self.addresses.len();
         self.addresses.push(self.data.len() as u64);
         self.data.extend_from_slice(&ADDRESS.to_le_bytes());
         self.data.extend_from_slice(&inside.map_or(0, |_| INSIDE_ANOTHER).to_le_bytes());
         self.data.extend_from_slice(&at.to_le_bytes());
         self.data.extend_from_slice(&(length as u64).to_le_bytes());
-        self.data.extend_from_slice(&(inside.unwrap_or(0) as u64).to_le_bytes());
-        // The address inside the frame is the frame's first field.
-        self.data.extend_from_slice(&0u64.to_le_bytes());
+        let (parent, offset) = inside.unwrap_or((0, 0));
+        self.data.extend_from_slice(&(parent as u64).to_le_bytes());
+        self.data.extend_from_slice(&(offset as u64).to_le_bytes());
         self.pointed += (length as u64).next_multiple_of(WORD);
         which
     }
@@ -212,6 +217,10 @@ impl<'a> Answer<'a> {
         Ok(i32::from_le_bytes(self.take(4)?.try_into().expect("four bytes")))
     }
 
+    pub fn u64(&mut self) -> Result<u64> {
+        Ok(u64::from_le_bytes(self.take(8)?.try_into().expect("eight bytes")))
+    }
+
     /// A truth value: a byte, padded to four as everything is.
     pub fn bool(&mut self) -> Result<bool> {
         Ok(self.take(4)?[0] != 0)
@@ -229,6 +238,11 @@ impl<'a> Answer<'a> {
         let at = u64::from_le_bytes(raw[8..16].try_into().expect("eight bytes"));
         let length = u64::from_le_bytes(raw[16..24].try_into().expect("eight bytes"));
         if at == 0 {
+            // A run of no bytes needs no room of its own, and the driver
+            // leaves its address at nothing.
+            if length == 0 {
+                return Ok(&[]);
+            }
             bail!("the service left out something the call asked for");
         }
         Ok(unsafe { std::slice::from_raw_parts(at as *const u8, length as usize) })
@@ -246,6 +260,33 @@ impl<'a> Answer<'a> {
         }
         let utf16: Vec<u16> = raw[..units as usize * 2].as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
         Ok(String::from_utf16_lossy(&utf16))
+    }
+
+    /// A run of bytes the far side answered with: the structure the older
+    /// layout keeps a run in, then the bytes themselves.
+    pub fn bytes(&mut self) -> Result<&'a [u8]> {
+        let frame = self.pointed().context("read the frame of a run of bytes")?;
+        if frame.len() < FRAME_BYTES {
+            bail!("the answer held a frame of {} bytes for a run", frame.len());
+        }
+        let length = u32::from_le_bytes(frame[8..12].try_into().expect("four bytes")) as usize;
+        let data = self.pointed().context("read a run of bytes")?;
+        if data.len() < length {
+            bail!("the answer held {} bytes where {length} were asked for", data.len());
+        }
+        Ok(&data[..length])
+    }
+
+    /// A text the far side answered with: the structure the older layout
+    /// keeps a text in, which the driver has copied here, and then the
+    /// text itself.
+    pub fn string(&mut self) -> Result<String> {
+        let frame = self.pointed().context("read the frame of a text")?;
+        if frame.len() < FRAME_BYTES {
+            bail!("the answer held a frame of {} bytes for a text", frame.len());
+        }
+        let raw = self.pointed().context("read a text")?;
+        Ok(String::from_utf8_lossy(raw.strip_suffix(&[0]).unwrap_or(raw)).into_owned())
     }
 
     /// The handle of an object in the answering process.
@@ -301,12 +342,7 @@ pub fn describes(service: &crate::driver::Handle) -> Result<String> {
     let reply = service.transact(DESCRIBE, &Message::call(BASE)).context("ask the service what it serves")?;
     let mut read = Answer::new(reply.bytes());
     read.status().context("ask the service what it serves")?;
-    let frame = read.pointed().context("read the frame of what the service serves")?;
-    if frame.len() < FRAME_BYTES {
-        bail!("the service answered a frame of {} bytes", frame.len());
-    }
-    let name = read.pointed().context("read the name of what the service serves")?;
-    Ok(String::from_utf8_lossy(name.strip_suffix(&[0]).unwrap_or(name)).into_owned())
+    read.string().context("read what the service serves")
 }
 
 #[cfg(test)]
@@ -344,11 +380,12 @@ mod tests {
     #[test]
     fn numbers_are_written_where_they_fall() {
         let mut m = Message::call("a.b@1.0::IC");
+        let open = m.data.len();
         m.u32(7);
         m.u64(1 << 40);
-        assert_eq!(m.data.len(), 12 + 4 + 8, "a word is not moved to a boundary of its own");
-        assert_eq!(u32::from_le_bytes(m.data[12..16].try_into().unwrap()), 7);
-        assert_eq!(u64::from_le_bytes(m.data[16..24].try_into().unwrap()), 1 << 40);
+        assert_eq!(m.data.len(), open + 4 + 8, "a word is not moved to a boundary of its own");
+        assert_eq!(u32::from_le_bytes(m.data[open..open + 4].try_into().unwrap()), 7);
+        assert_eq!(u64::from_le_bytes(m.data[open + 4..open + 12].try_into().unwrap()), 1 << 40);
     }
 
     #[test]
@@ -397,6 +434,25 @@ mod tests {
     fn reading_past_the_end_of_a_reply_is_an_error() {
         assert!(Answer::new(&[]).i32().is_err());
         assert!(Answer::new(&[0; 8]).pointed().is_err());
+    }
+
+    #[test]
+    fn a_text_answer_is_a_frame_and_the_text_it_names() {
+        let text: &'static [u8] = Box::leak(b"qti\0".to_vec().into_boxed_slice());
+        let mut frame = vec![0u8; FRAME_BYTES];
+        frame[0..8].copy_from_slice(&(text.as_ptr() as u64).to_le_bytes());
+        frame[8..12].copy_from_slice(&3u32.to_le_bytes());
+        let frame: &'static [u8] = Box::leak(frame.into_boxed_slice());
+        let mut answer = Vec::new();
+        for (data, length) in [(frame, FRAME_BYTES), (text, 4)] {
+            answer.extend_from_slice(&ADDRESS.to_le_bytes());
+            answer.extend_from_slice(&0u32.to_le_bytes());
+            answer.extend_from_slice(&(data.as_ptr() as u64).to_le_bytes());
+            answer.extend_from_slice(&(length as u64).to_le_bytes());
+            answer.extend_from_slice(&0u64.to_le_bytes());
+            answer.extend_from_slice(&0u64.to_le_bytes());
+        }
+        assert_eq!(Answer::new(&answer).string().unwrap(), "qti", "the terminator the count leaves out is stripped");
     }
 
     #[test]
