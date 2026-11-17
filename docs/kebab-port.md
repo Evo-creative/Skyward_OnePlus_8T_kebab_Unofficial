@@ -54,14 +54,14 @@
 | 擦除 / 格式化 / 工厂重置 | 🟡 | 未测 |
 | **`/data` 解密（FBE+metadata）** | ✅ | Keymaster 4.x HIDL 客户端已实现；metadata key、wrapped key、dm-default-key、用户 CE 全部打通（见 §8.3） |
 | 文件管理器（内部存储） | ✅ | `/data` 打开后可浏览 |
-| MTP（内部存储） | 🟠 | 设备能被电脑识别；**内部存储在 `/data` 解锁后才出现**，待按 §8.2 复测读写 |
+| MTP（内部存储） | ✅ | 已在 Nautilus 中实测：`/data` 解锁后电脑能看到并读写内部存储（2026-11-18） |
 
 ### 1.4 连接与网络
 
 | 期望功能 | 状态 | 说明 |
 |---|---|---|
 | adb root shell | ✅ | File transfer 关闭时正常 |
-| MTP | 🟠 | 见 1.3；USB 端口问题已修 |
+| MTP | ✅ | 见 1.3；USB 端口问题已修，2026-11-18 实测可用 |
 | **Wi-Fi** | 🟠 | QMI 握手 + 校准成功；无 `wlan0`。相关服务已从配置注释掉，避免 `CNSS_ASSERT` → EDL |
 | 在线检查更新（GitHub） | ❌ | 依赖 Wi-Fi |
 | fastbootd | 🟡 | 未测 |
@@ -69,7 +69,7 @@
 ### 1.5 量化
 
 - **完全可用**：启动、UI、120Hz、触摸、背光、振动、`/data` 解密、内部存储文件管理、分区挂载、adb、日志、SELinux 修复、About、字体
-- **代码就绪待验证**：槽位切换、备份/恢复、刷写、fastbootd、语言切换、MTP 复测（按约定暂不逐项实测）
+- **代码就绪待验证**：槽位切换、备份/恢复、刷写、fastbootd、语言切换（按约定暂不逐项实测）
 - **未实现 / 受阻**：Wi-Fi 完整（唯一功能缺口）、在线更新（依赖 Wi-Fi）、双系统（无 `init_boot`）
 
 ### 1.6 阻塞项
@@ -514,7 +514,7 @@ cnss: fatal: Timeout waiting for FW ready indication
 - `switch` 失败时回退到原配置
 - 关闭 File transfer 可恢复 adb（已验证：`18d1:d001` → adb 正常）
 
-待验证：重新打开 File transfer 后 MTP 是否工作。
+**已复测（2026-11-18）**：File transfer 打开、`/data` 解锁后，Nautilus 能看到设备并读写内部存储，正常。
 
 ### 8.3 Data 解密（已可用，2026-11-17 深夜实机验证）
 
@@ -594,6 +594,7 @@ echo 1 > activate   # 开始播放
 ```
 
 - 点击：10 ms（与 Lineage 设备 overlay 的 `config_virtualKeyVibePattern` 一致）
+- 实机确认：开关/跳转行/输入法按键/解锁键盘/图案逐点/滑块/侧滑返回/熄屏双击 都有反馈
 - 熄屏双击：两次 10 ms，间隔 60 ms（驱动一次只播一个片段）
 - 强度：`gain` 0x01–0x75（0x00 不振）；滑块映射约 0x2F–0x75，默认档约 0x33，实测手感与 `gain=0x30` 相当
 - 官方振动 HAL 不写 `gain`，所以系统里的强度设置对这台机器的开环马达本来就不起作用；Skyward 的滑块直接驱动它
@@ -679,7 +680,7 @@ kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。�
    - 找出不依赖 wifi HAL 的触发方式（ioctl / sysfs / 驱动注册时序）
    - 上机时**每次启动只写一次 `fs_ready`**，且 `cnss-daemon` 以 system 用户 + 正确组启动
    - 相关服务目前已在 `devices/kebab.toml` 注释掉，避免 `CNSS_ASSERT` → EDL
-2. **复测 MTP**：重新打开 File transfer，确认 `e017082` 生效（上次只验证了关闭后 adb 恢复）。
+2. ~~复测 MTP~~ 已完成（2026-11-18）：data 解锁后电脑可读写内部存储。
    注意 MTP 只有在 data 分区打开后才提供内部存储（`storage_open()`），否则电脑只看到设备、看不到存储；
    首页「文件传输」下方的脚注已写明这一点
 3. **暂不实测**：备份/恢复、刷写、fastbootd、槽位切换 —— 按用户要求先记着，代码路径都在，不做逐项实机验证
