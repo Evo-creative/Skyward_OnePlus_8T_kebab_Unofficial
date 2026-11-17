@@ -660,6 +660,14 @@ mod tests {
     use skyward_info::Charge;
 
     #[test]
+    fn the_clock_moves_past_a_camera_cut_into_its_corner() {
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        let usual = app.theme().m.status_x;
+        app.set_status_inset(10.0);
+        assert_eq!(app.theme().m.status_x, usual + 10.0 * PPD);
+    }
+
+    #[test]
     fn a_page_drawn_a_band_at_a_time_is_the_page_drawn_whole() {
         let (f, i) = (fonts(), info());
         let state = State::default();

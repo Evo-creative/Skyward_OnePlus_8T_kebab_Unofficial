@@ -271,6 +271,17 @@ impl Keeper {
         }
     }
 
+    /// The settings to write at once, with no wait: those the pages show,
+    /// where the file holds others and what it holds is known. A phone
+    /// about to reboot keeps a change made a moment ago, which [`due`]
+    /// would have waited on.
+    ///
+    /// [`due`]: Keeper::due
+    pub fn flush(&mut self, show: Settings) -> Option<Settings> {
+        let holds = self.holds.as_ref()?;
+        (holds.as_ref() != Some(&show)).then_some(show)
+    }
+
     /// `settings` are in the file now.
     pub fn written(&mut self, settings: Settings) {
         self.holds = Some(Some(settings));
@@ -295,6 +306,18 @@ impl Keeper {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_change_made_just_before_a_reboot_is_written_at_once() {
+        let settings = Settings::default();
+        let mut keeper = Keeper::new(&Kept::Settings(settings.clone()));
+        assert_eq!(keeper.flush(settings.clone()), None, "nothing changed, nothing to write");
+        let mut changed = settings;
+        changed.time_zone = "UTC".into();
+        assert_eq!(keeper.flush(changed.clone()), Some(changed.clone()));
+        keeper.written(changed.clone());
+        assert_eq!(keeper.flush(changed), None, "what is written is not written again");
+    }
 
     #[test]
     fn the_settings_go_round_through_their_file() {

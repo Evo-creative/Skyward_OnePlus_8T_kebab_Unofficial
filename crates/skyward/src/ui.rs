@@ -1293,6 +1293,7 @@ impl<'a> Pages<'a> {
         };
         let mut app = App::new(first, w, h, cfg.display.density as f32 / 160.0);
         app.set_screen_corners(cfg.display.corner_radius as f32);
+        app.set_status_inset(cfg.display.status_inset);
         // The settings kept from the starts before are back before the first
         // frame, and before file transfer starts with its switch and the time
         // zone. The pages speak the language chosen then, or else the one the
@@ -1585,6 +1586,7 @@ impl<'a> Pages<'a> {
         let now = monotonic_ms();
         if self.leave_at.is_some_and(|at| now >= at) {
             self.leave_at = None;
+            self.keep_settings_now()?;
             power(self.leave)?;
         }
         if !self.touch_known && self.started.elapsed() >= TOUCH_WAIT {
@@ -2235,6 +2237,23 @@ impl Pages<'_> {
     /// while nothing else has /metadata: not in fastboot, whose fastbootd
     /// may, nor while an install, a merge, erasing, a backup or work on
     /// whole partitions is under way.
+    /// Keep the settings the pages show at once, if the file holds others:
+    /// what a phone about to reboot must not lose.
+    fn keep_settings_now(&mut self) -> Result<()> {
+        let Some(due) = self.keeper.flush(self.app.settings()) else { return Ok(()) };
+        match settings::write(&due) {
+            Ok(()) => {
+                skyward_sys::kmsg("the settings are kept")?;
+                self.keeper.written(due);
+            }
+            Err(e) => {
+                skyward_sys::kmsg(&format!("the settings were not kept: {e:#}"))?;
+                self.keeper.failed();
+            }
+        }
+        Ok(())
+    }
+
     fn keep_settings(&mut self, now: u64) -> Result<()> {
         let metadata_busy = self.fastboot
             || self.installer.is_some()
@@ -2513,8 +2532,10 @@ impl Pages<'_> {
         let cfg = self.cfg;
         match fx {
             // Leaving is the user's answer to whatever the request
-            // still kept in misc asked.
+            // still kept in misc asked. A setting changed a moment ago is
+            // kept before the phone goes, not two seconds after it.
             Effect::Reboot(target) => {
+                self.keep_settings_now()?;
                 self.done_with_request()?;
                 power(target)?
             }

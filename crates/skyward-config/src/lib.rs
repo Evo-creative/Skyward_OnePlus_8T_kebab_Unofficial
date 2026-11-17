@@ -334,6 +334,10 @@ pub struct Display {
     /// sliding over another rounds its leading corners to it.
     #[serde(default)]
     pub corner_radius: u32,
+    /// How much further right the status bar's clock starts, in dp, on a
+    /// phone whose front camera cuts into the corner it sits in.
+    #[serde(default)]
+    pub status_inset: f32,
 }
 
 #[derive(Debug, Clone, Deserialize)]

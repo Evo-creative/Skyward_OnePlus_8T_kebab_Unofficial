@@ -1195,6 +1195,8 @@ pub struct App {
     backdrop: Option<Canvas>,
     /// How round the screen's corners are, in pixels.
     corners: f32,
+    /// How far past its usual place the status bar's clock starts, in dp.
+    status_inset: f32,
     dirty: bool,
     w: u32,
     h: u32,
@@ -1261,6 +1263,7 @@ impl App {
             cols: 0,
             backdrop: None,
             corners: 0.0,
+            status_inset: 0.0,
             dirty: true,
             w,
             h,
@@ -1274,12 +1277,20 @@ impl App {
         self.corners = radius;
     }
 
+    /// Move the status bar's clock this many dp further right, past a
+    /// front camera cut into the corner where it sits.
+    pub fn set_status_inset(&mut self, dp: f32) {
+        self.status_inset = dp;
+    }
+
     pub fn theme(&self) -> Theme {
-        if self.state.dark {
+        let mut t = if self.state.dark {
             Theme::dark(self.w, self.h, self.px_per_dp)
         } else {
             Theme::light(self.w, self.h, self.px_per_dp)
-        }
+        };
+        t.m.status_x += self.status_inset * self.px_per_dp;
+        t
     }
 
     pub fn screen(&self) -> Screen {
