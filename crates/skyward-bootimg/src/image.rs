@@ -158,6 +158,16 @@ impl BootImage {
         let page = header.page_size();
         ensure!(page > 0, "the header names a page size of 0");
         let layout = Layout::of(&header)?;
+        // The sections are laid down in the order their sizes give, so the
+        // offset the header names for the recovery DTBO is made to match
+        // where it lands: a bootloader reads it from there.
+        if let Header::V0(h) = &mut header {
+            match &mut h.versioned {
+                HeaderV0Versioned::V1 { recovery_dtbo_addr, .. } => *recovery_dtbo_addr = layout.recovery_dtbo as u64,
+                HeaderV0Versioned::V2 { recovery_dtbo_addr, .. } => *recovery_dtbo_addr = layout.recovery_dtbo as u64,
+                HeaderV0Versioned::V0 => {}
+            }
+        }
         let mut out = Vec::new();
         header.write(&mut out).context("write header")?;
         pad(&mut out, page);
@@ -222,8 +232,13 @@ mod tests {
         header.extend_from_slice(&legacy_id(kernel, ramdisk, second, dtbo, dtb));
         header.extend_from_slice(&[0; 1024]); // extra command line
         if version >= 1 {
+            // The sections are laid down from the header's page on, each
+            // padded to the page, so the DTBO's offset follows from their
+            // sizes.
+            let at = |n: usize| n.div_ceil(page) * page;
+            let dtbo_offset = page + at(kernel.len()) + at(ramdisk.len()) + at(second.len());
             u32le!(dtbo.len() as u32);
-            u64le!(0); // recovery dtbo offset
+            u64le!(dtbo_offset as u64);
             u32le!(if version >= 2 { 1660 } else { 1648 });
         }
         if version >= 2 {
@@ -322,6 +337,22 @@ mod tests {
         let mut id = [0u8; 32];
         id[..20].copy_from_slice(&sha.finalize());
         id
+    }
+
+    #[test]
+    fn a_version_two_image_points_at_its_recovery_dtbo_where_it_lays_it() {
+        let bytes = image(2, 4096, b"kernel", b"ramdisk", &[], b"dtbo", b"dtb");
+        let mut img = BootImage::parse(&bytes).unwrap();
+        img.ramdisk = vec![0u8; 9000];
+        let made = img.to_bytes().unwrap();
+        let offset = match BootImage::parse(&made).unwrap().header {
+            Header::V0(h) => match h.versioned {
+                HeaderV0Versioned::V2 { recovery_dtbo_addr, .. } => recovery_dtbo_addr,
+                _ => unreachable!(),
+            },
+            Header::V3(_) => unreachable!(),
+        };
+        assert_eq!(&made[offset as usize..offset as usize + 4], b"dtbo", "the header's offset names the DTBO's place");
     }
 
     #[test]
