@@ -96,6 +96,15 @@ mod sys {
         Path::new(BY_NAME)
     }
 
+    /// Whether the phone has the partition the second system's first program
+    /// starts from. A phone without one, as the OnePlus 8T, holds no second
+    /// system, and nothing here writes the boot partitions for one.
+    fn holds_a_second_system() -> bool {
+        fs::read_dir(by_name())
+            .map(|entries| entries.flatten().any(|e| e.file_name().to_string_lossy().starts_with(store::INIT_BOOT)))
+            .unwrap_or(false)
+    }
+
     /// Where the data partition is mounted.
     const DATA: &str = "/data";
 
@@ -172,6 +181,10 @@ mod sys {
     /// waits for any update to be merged, and first checks that the other
     /// system's root is still where it was put.
     pub fn switch_to(next: Slot, to: Who) -> Result<()> {
+        ensure!(
+            holds_a_second_system(),
+            "the phone has no init_boot partition, so it cannot hold a second system, and its boot partitions are left as they are"
+        );
         let state = state()?;
         if to == Who::Other {
             let update = skyward_vab::snapshot_state()?;
@@ -185,6 +198,12 @@ mod sys {
     /// Finish a switch cut off before, where one was; says whether there
     /// was one.
     pub fn resume() -> Result<bool> {
+        // A phone whose boot partitions cannot hold a second system's first
+        // program never has a switch to finish, and its boot partitions are
+        // left alone whatever a file in metadata says.
+        if !holds_a_second_system() {
+            return Ok(false);
+        }
         let state = state()?;
         if state.switching.is_none() {
             return Ok(false);

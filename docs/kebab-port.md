@@ -416,6 +416,14 @@ AW8697 暴露 `/sys/class/leds/vibrator`（`duration` + `activate`），而 `sky
 
 kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。需要重新设计「第二个系统的 first-stage 放在哪」，工作量大，暂不处理。
 
+保护（2026-11-17 加入）：
+
+- UI 层：`dual_boot` 要求 `boot` 与 `init_boot` 两个分区都存在（`ui.rs:1353`），
+  kebab 上为 `false`，`systems_worker` 不会创建，也就不会发 `Task::Resume`。
+- 库层：`install::resume()` 在没有 `init_boot` 时直接返回 `Ok(false)`；
+  `install::switch_to()` 直接报错。即使上层逻辑以后变化，也不会写 `boot`/`init_boot`。
+- `ensure_installed()`（fastboot 前恢复主系统 boot）只在 `fastboot && dual_boot` 时调用。
+
 ### 8.6 AVB：未签名 footer 与验证模式（2026-11-17 补充）
 
 现象：
