@@ -57,6 +57,12 @@ const SWITCH: &str = "/dev/wlan";
 /// before the switch is thrown: the driver waits for it only once it has.
 const CALIBRATION_START: Duration = Duration::from_secs(2);
 
+/// The daemon the firmware's calibration asks are answered by, and how long
+/// it is given to come up once the folder it keeps its sockets in is there:
+/// the service directory starts it again after each time it left.
+const DAEMON: &str = "/vendor/bin/cnss-daemon";
+const DAEMON_WAIT: Duration = Duration::from_secs(10);
+
 /// Where the phone's own WLAN daemon answers the firmware's calibration
 /// asks, and the folder above it, on the data partition, which is there
 /// once it is open.
@@ -675,6 +681,15 @@ fn bring_up(cfg: &Config, modules: &[PathBuf]) -> Result<()> {
             // The data partition is not open yet; the daemon leaves until it
             // is, and the service directory starts it again.
             Err(e) => skyward_sys::kmsg(&format!("the WLAN daemon's folder was not made: {e:#}"))?,
+        }
+        // Calibrating with no one to answer its asks leaves the firmware
+        // waiting, and what follows is the secure world's crash dump: the
+        // daemon has to be up first. The service directory starts it again
+        // once its folder is there, which is why it is waited for here.
+        let until = Instant::now() + DAEMON_WAIT;
+        while crate::services::running(DAEMON).is_none() {
+            ensure!(Instant::now() < until, "{DAEMON} is not running, so the chip is left alone");
+            thread::sleep(Duration::from_millis(100));
         }
         for w in &cfg.writes {
             fs::write(&w.path, &w.value).with_context(|| format!("write {} to {}", w.value, w.path))?;
