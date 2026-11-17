@@ -13,6 +13,9 @@ use std::path::Path;
 /// The key service, and the packages whose services it serves besides: it
 /// is one program behind them all.
 const KEYS: &str = "android.hardware.security.keymint.IKeyMintDevice/default";
+/// The key service of the older layout, which a phone with no newer one
+/// keeps under the name its package and interface make.
+const KEYS_OLDER: (&str, &str) = ("android.hardware.keymaster", "IKeymasterDevice");
 const KEY_PACKAGES: [&str; 3] = ["android.hardware.security.keymint", "android.hardware.security.secureclock", "android.hardware.security.sharedsecret"];
 
 /// The credential service and the boot control, each by its package and
@@ -161,10 +164,24 @@ pub fn steps(phone: &Phone) -> Result<Vec<Step>> {
         }
     }
 
-    ensure!(described(phone, Kind::Aidl, KEYS).is_some(), "the phone describes no {KEYS}");
-    let keys = behind(phone, "the key service", KEYS, |file| file.contains("keymint") && !file.contains("strongbox"))?;
-    let with_keys = |d: &Described| d.instance == INSTANCE && KEY_PACKAGES.contains(&d.package.as_str());
-    start(&mut out, started(phone, keys, Ready::Service(KEYS.into()), besides(phone, keys, KEYS, with_keys)));
+    // The key service of whichever layout the phone describes: the newer
+    // one where it has it, else the older, which the phone's own keymaster
+    // program serves and which needs the directory for hardware services.
+    let (keys_name, keys_kind) = match described(phone, Kind::Aidl, KEYS) {
+        Some(_) => (KEYS.to_string(), Kind::Aidl),
+        None => offered(phone, KEYS_OLDER).context("the phone describes no key service, of either layout")?,
+    };
+    let keys = behind(phone, "the key service", &keys_name, |file| {
+        (file.contains("keymint") || file.contains("keymaster")) && !file.contains("strongbox")
+    })?;
+    let with_keys = |d: &Described| {
+        d.instance == INSTANCE && (KEY_PACKAGES.contains(&d.package.as_str()) || d.package == KEYS_OLDER.0)
+    };
+    let ready_keys = match keys_kind {
+        Kind::Aidl => Ready::Service(keys_name.clone()),
+        Kind::Hidl => Ready::HardwareService(keys_name.clone()),
+    };
+    start(&mut out, started(phone, keys, ready_keys, besides(phone, keys, &keys_name, with_keys)));
 
     let (credentials, credentials_kind) = offered(phone, CREDENTIALS).context("the phone describes no credential service")?;
     let (boot, boot_kind) = offered(phone, BOOT).context("the phone describes no boot control")?;

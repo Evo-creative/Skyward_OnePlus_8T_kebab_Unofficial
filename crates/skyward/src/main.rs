@@ -181,6 +181,10 @@ enum Cmd {
         #[arg(long)]
         alias: Option<String>,
     },
+    /// Report the phone's key service of the older hardware layout and what
+    /// it says it can do.
+    #[cfg(target_os = "android")]
+    Keymaster,
     /// Say what the phone's credential service answers, which takes no
     /// credential and changes nothing.
     #[cfg(target_os = "android")]
@@ -368,6 +372,19 @@ fn main() -> Result<()> {
             }
             let raw = stored.unwrap(skyward_crypto::keystore::Unwrap::Hardware(&service))?;
             println!("{} holds a key of {} bytes", key.display(), raw.len());
+            Ok(())
+        }
+        #[cfg(target_os = "android")]
+        Cmd::Keymaster => {
+            let hardware = skyward_binder::driver::Binder::hardware()?;
+            let service = skyward_crypto::keymaster::Keymaster::open(&hardware)?;
+            let hw = service.hardware()?;
+            println!("{}", service.interface());
+            println!(
+                "secure {} ec {} symmetric {} attestation {} all users {}",
+                hw.secure, hw.ec, hw.symmetric, hw.attestation, hw.all_users
+            );
+            println!("client {} storage {} attestation {}", hw.client_id, hw.storage_key, hw.attestation_key);
             Ok(())
         }
         #[cfg(target_os = "android")]
