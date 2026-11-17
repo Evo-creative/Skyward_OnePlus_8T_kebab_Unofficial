@@ -27,7 +27,7 @@ Skyward 是使用 Rust 编写的 recovery，从零开始编写。
 
 ### 刷入
 
-第一次刷入 Skyward 之前，先把手机原来的 recovery 取出来（之后就变成 Skyward 了）；这份镜像也是刷回去用的：
+第一次刷入 Skyward 之前，先进入手机原来的 recovery（`adb reboot recovery`），再把 recovery 分区取出来。recovery 里的 adb 已经是 root，不需要 `adb root`；若在正常系统里取，则要先 root（`adb root` 或 `su`）。这份镜像也是刷回去用的：
 
 ```sh
 adb shell 'dd if=/dev/block/by-name/recovery_a of=/tmp/recovery.img'

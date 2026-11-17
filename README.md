@@ -33,8 +33,10 @@ Wi-Fi, Skyward's online update and dual boot.
 
 ### Flashing
 
-Take the phone's own recovery first, once, before Skyward is flashed: after that
-the recovery partition holds Skyward, and this file is also the way back.
+Take the phone's own recovery first, once, before Skyward is flashed: boot into it
+(`adb reboot recovery`) and read the partition there, where adb is already root.
+From a booted system it needs root first (`adb root`, or `su`). After that the
+recovery partition holds Skyward, and this file is also the way back.
 
 ```sh
 adb shell 'dd if=/dev/block/by-name/recovery_a of=/tmp/recovery.img'
