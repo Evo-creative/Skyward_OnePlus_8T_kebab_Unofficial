@@ -66,6 +66,15 @@ partition = "modem"
 # firmware and the modem. Neither runs by itself in a recovery, and without
 # them the firmware never reports ready. The daemon answers on a folder of
 # its own on the data partition, which is made when the WLAN comes up.
+# The directory the phone's vendor side registers with, which the WLAN
+# service this phone runs is one of: without it that service waits for a
+# directory that never comes.
+[[service]]
+path = "/vendor/bin/vndservicemanager"
+args = ["/dev/vndbinder"]
+user = "system"
+groups = ["system", "readproc"]
+
 [[service]]
 path = "/vendor/bin/qrtr-ns"
 

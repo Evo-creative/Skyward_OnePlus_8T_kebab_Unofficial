@@ -67,6 +67,12 @@ const RECOVERY_LABELS: &str = "/system/etc/selinux";
 const HARDWARE_DRIVER: &str = "/dev/hwbinder";
 const HARDWARE_DRIVER_NODE: &str = "/dev/binderfs/hwbinder";
 
+/// The driver a phone's vendor services talk over, which its own programs of
+/// the vendor side expect to find as well, and which a recovery points at
+/// its node here where that is not made already.
+const VENDOR_DRIVER: &str = "/dev/vndbinder";
+const VENDOR_DRIVER_NODE: &str = "/dev/binderfs/vndbinder";
+
 /// The directory for those services is itself one of them, and it turns
 /// itself off when the running system does not describe it.
 const HARDWARE_DIRECTORY: &str = "android.hidl.manager@1.2::IServiceManager/default";
@@ -126,6 +132,15 @@ pub fn prepare_hardware_directory(wanted: &[String]) -> Result<()> {
     // as the users their init scripts name.
     fs::set_permissions(driver, std::os::unix::fs::PermissionsExt::from_mode(0o666))
         .with_context(|| format!("open {HARDWARE_DRIVER} to every program"))?;
+    // The vendor side's directory has its own driver, which the phone's
+    // programs of that side find here.
+    let vendor = Path::new(VENDOR_DRIVER);
+    if !vendor.exists() && Path::new(VENDOR_DRIVER_NODE).exists() {
+        std::os::unix::fs::symlink(VENDOR_DRIVER_NODE, vendor)
+            .with_context(|| format!("point {VENDOR_DRIVER} at {VENDOR_DRIVER_NODE}"))?;
+        fs::set_permissions(vendor, std::os::unix::fs::PermissionsExt::from_mode(0o666))
+            .with_context(|| format!("open {VENDOR_DRIVER} to every program"))?;
+    }
     let from = Path::new(SERVICE_LABELS);
     let into = Path::new(RECOVERY_LABELS).join(from.file_name().expect("a named file"));
     fs::create_dir_all(RECOVERY_LABELS).with_context(|| format!("make {RECOVERY_LABELS}"))?;
