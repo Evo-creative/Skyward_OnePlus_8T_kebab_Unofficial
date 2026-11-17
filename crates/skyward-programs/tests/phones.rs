@@ -270,12 +270,14 @@ fn ishtar_s_programs_are_found_as_they_were_started_on_the_phone_and_its_opener_
             environment: Vec::new(),
             anew: false,
         },
+        // The directory for hardware services starts before what registers
+        // with it, which the older kind of credential service does.
+        Started::from(Service { ready_property: Some("hwservicemanager.ready".into()), ..program("/mnt/system_ext/bin/hwservicemanager", &ON_SYSTEM, "system", &["system", "readproc"]) }),
         Started::from(Service {
             ready_service: Some(KEYS.into()),
             registers: strings(&[SHARED_SECRET, CLOCK, PROVISIONING]),
             ..program("/vendor/bin/hw/android.hardware.security.keymint-service-qti", &ON_VENDOR, "system", &["system", "drmrpc"])
         }),
-        Started::from(Service { ready_property: Some("hwservicemanager.ready".into()), ..program("/mnt/system_ext/bin/hwservicemanager", &ON_SYSTEM, "system", &["system", "readproc"]) }),
         Started::from(Service {
             ready_hardware_service: Some("android.hardware.gatekeeper@1.0::IGatekeeper/default".into()),
             ..program("/vendor/bin/hw/android.hardware.gatekeeper@1.0-service-qti", &ON_VENDOR, "system", &["system"])
