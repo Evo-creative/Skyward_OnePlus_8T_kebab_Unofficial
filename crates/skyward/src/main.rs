@@ -381,8 +381,8 @@ fn main() -> Result<()> {
         Cmd::Keymaster { key } => {
             let hardware = skyward_binder::driver::Binder::hardware()?;
             let service = skyward_crypto::keymaster::Keymaster::open(&hardware)?;
+            println!("{} serves {:?}", service.interface(), service.served());
             let hw = service.hardware()?;
-            println!("{}", service.interface());
             println!("security level {} (0 software, 1 secure world, 2 its own chip)", hw.security_level);
             println!("{} by {}", hw.name, hw.author);
             if let Some(key) = key {

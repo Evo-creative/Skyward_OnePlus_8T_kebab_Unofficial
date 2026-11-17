@@ -60,6 +60,11 @@ impl<'a> Keymaster<'a> {
         self.interface
     }
 
+    /// What the far side says it serves.
+    pub fn served(&self) -> Result<String> {
+        hidl::describes(&self.device)
+    }
+
     /// What the service says about the hardware it runs on.
     pub fn hardware(&self) -> Result<Hardware> {
         let call = Message::call(self.interface);

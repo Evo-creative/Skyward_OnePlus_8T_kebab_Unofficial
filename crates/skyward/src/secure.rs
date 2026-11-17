@@ -49,6 +49,11 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 /// and where the installed system keeps the one it was built for: in the
 /// bundle that carries the rest of its own runtime.
 const EARLY_LOADER: &str = "/system/bin/bootstrap/linker64";
+/// The same loader as the installed system keeps it, where it keeps one
+/// outside the runtime bundle. A phone whose recovery cannot open the
+/// bundle's image, as one whose SELinux policy lets no loop device read a
+/// recovery's file, mounts nothing and uses this instead.
+const INSTALLED_LOADER: &str = "/mnt/system/system/bin/bootstrap/linker64";
 const RUNTIME_BUNDLE: &str = "com.android.runtime";
 const BUNDLE_LOADER: &str = "bin/linker64";
 
@@ -90,10 +95,15 @@ pub fn prepare_hardware_directory(wanted: &[String]) -> Result<()> {
     // installed system's programs are loaded by the installed system's
     // loader rather than by the older one a recovery carries.
     let loader = Path::new(EARLY_LOADER);
-    let from = bundle(RUNTIME_BUNDLE)?
-        .map(|at| at.join(BUNDLE_LOADER))
-        .filter(|p| p.is_file())
-        .with_context(|| format!("the installed system carries no {RUNTIME_BUNDLE}, which holds the loader its own programs ask for"))?;
+    let installed = Path::new(INSTALLED_LOADER);
+    let from = if installed.is_file() {
+        installed.to_path_buf()
+    } else {
+        bundle(RUNTIME_BUNDLE)?
+            .map(|at| at.join(BUNDLE_LOADER))
+            .filter(|p| p.is_file())
+            .with_context(|| format!("the installed system carries no {RUNTIME_BUNDLE}, which holds the loader its own programs ask for"))?
+    };
     let dir = loader.parent().expect("the loader is in a directory");
     fs::create_dir_all(dir).with_context(|| format!("make {}", dir.display()))?;
     // Made under the recovery's own umask the folder is root's alone, and

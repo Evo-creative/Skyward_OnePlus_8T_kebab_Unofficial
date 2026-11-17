@@ -121,7 +121,11 @@ mod sys {
             }
             let e = os_error();
             match e.raw_os_error() {
-                Some(libc::EINVAL | libc::ENODEV) => refused.push(format!("{fs}: {e}")),
+                // A filesystem that is not the one the image holds says so
+                // in one of the ways the kernel has of refusing a mount;
+                // erofs says it with an I/O error on a superblock it does
+                // not know, which a run of the others then tries past.
+                Some(libc::EINVAL | libc::ENODEV | libc::EIO) => refused.push(format!("{fs}: {e}")),
                 _ => {
                     return Err(e).with_context(|| format!("mount {} on {} as {fs}", device.display(), target.display()))
                 }
