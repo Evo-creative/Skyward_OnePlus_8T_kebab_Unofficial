@@ -237,9 +237,25 @@ pub struct Haptics {
     #[serde(default)]
     pub click: Option<i16>,
     /// The file the driver says the motor's resonant frequency in, in
-    /// tenths of a hertz whatever its label.
-    pub resonance: String,
-    pub strength: Strength,
+    /// tenths of a hertz whatever its label. A phone whose motor is shown
+    /// as a light has none.
+    #[serde(default)]
+    pub resonance: Option<String>,
+    /// How strongly the slider's ends drive the motor.
+    #[serde(default)]
+    pub strength: Option<Strength>,
+    /// The folder the kernel shows the motor in as a light, on phones whose
+    /// kernel drives the motor that way rather than through force-feedback:
+    /// a file that says how long the next vibration lasts, and one that
+    /// starts it.
+    #[serde(default)]
+    pub led: Option<String>,
+}
+
+impl Strength {
+    /// What the slider drives the motor with where a phone's configuration
+    /// does not say.
+    pub const DEFAULT: Strength = Strength { lightest: 0.25, strongest: 0.75 };
 }
 
 /// How strongly the click plays, each as a share of the most its waveform
@@ -564,13 +580,22 @@ impl DeviceConfig {
             ensure!(plain && !folder.is_empty(), "[backup] data_skipped: {folder} is not a path from the top of {DATA}");
         }
         if let Some(haptics) = &cfg.haptics {
-            let file = &haptics.resonance;
-            ensure!(Path::new(file).is_absolute(), "[haptics] resonance: {file} is not an absolute path");
-            let Strength { lightest, strongest } = haptics.strength;
+            if let Some(file) = &haptics.resonance {
+                ensure!(Path::new(file).is_absolute(), "[haptics] resonance: {file} is not an absolute path");
+            }
+            if let Some(dir) = &haptics.led {
+                ensure!(Path::new(dir).is_absolute(), "[haptics] led: {dir} is not an absolute path");
+            }
             ensure!(
-                0.0 < lightest && lightest < strongest && strongest <= 1.0,
-                "[haptics] strength: {lightest} and {strongest} are not shares rising from above 0 to at most 1"
+                haptics.resonance.is_some() || haptics.led.is_some(),
+                "[haptics] says neither where the motor's resonant frequency is read nor where the motor is shown as a light"
             );
+            if let Some(Strength { lightest, strongest }) = haptics.strength {
+                ensure!(
+                    0.0 < lightest && lightest < strongest && strongest <= 1.0,
+                    "[haptics] strength: {lightest} and {strongest} are not shares rising from above 0 to at most 1"
+                );
+            }
         }
         if let Some(logd) = &cfg.logd {
             for library in &logd.libraries {
@@ -666,8 +691,8 @@ mod tests {
     fn ishtar_clicks_with_a_waveform_its_driver_keeps() {
         let cfg = DeviceConfig::parse(include_str!("../../../devices/ishtar.toml")).unwrap();
         let haptics = cfg.haptics.expect("the 13 Ultra has a motor");
-        assert_eq!((haptics.click, haptics.resonance.as_str()), (Some(0), "/sys/class/qcom-haptics/lra_frequency_hz"));
-        assert_eq!(haptics.strength, Strength { lightest: 0.5, strongest: 1.0 });
+        assert_eq!((haptics.click, haptics.resonance.as_deref()), (Some(0), Some("/sys/class/qcom-haptics/lra_frequency_hz")));
+        assert_eq!(haptics.strength, Some(Strength { lightest: 0.5, strongest: 1.0 }));
     }
 
     #[test]
@@ -678,7 +703,11 @@ mod tests {
         assert!(with(&format!("click = 0\n{resonance}\n{strength}")).is_ok(), "a click kept");
         assert!(with(&format!("click = 0\n{strength}")).is_err(), "no motor's resonance to make the ticks at");
         assert!(with(&format!("resonance = \"sys/f\"\n{strength}")).is_err(), "a file named from nowhere");
-        assert!(with(resonance).is_err(), "a click without its strengths");
+        let led = "led = \"/sys/class/leds/vibrator\"";
+        assert!(with(led).is_ok(), "a motor shown as a light needs no resonance");
+        assert!(with(&format!("led = \"sys/class/leds/vibrator\"")).is_err(), "a light named from nowhere");
+        assert!(with("").is_err(), "a motor that says neither how it is driven");
+        assert!(with(resonance).is_ok(), "a motor whose slider's ends are the ones every phone starts with");
         for (lightest, strongest) in [(0.0, 0.5), (0.5, 0.5), (0.5, 0.25), (0.25, 1.5)] {
             let s = format!("{resonance}\nstrength = {{ lightest = {lightest:?}, strongest = {strongest:?} }}");
             assert!(with(&s).is_err(), "{lightest} to {strongest} is refused");
@@ -732,8 +761,8 @@ mod tests {
         assert_eq!(post_boot.args, ["/vendor/bin/init.kernel.post_boot.sh"]);
         assert_eq!(post_boot.libraries, ["/system/lib64", "/vendor/lib64"], "it loads the recovery's own libraries first");
         let haptics = cfg.haptics.expect("the 17 Ultra has a motor");
-        assert_eq!((haptics.click, haptics.resonance.as_str()), (None, "/sys/class/qcom-haptics/lra_frequency_hz"), "its click is made");
-        assert_eq!(haptics.strength, Strength { lightest: 0.25, strongest: 0.75 }, "past three quarters the motor rattles");
+        assert_eq!((haptics.click, haptics.resonance.as_deref()), (None, Some("/sys/class/qcom-haptics/lra_frequency_hz")), "its click is made");
+        assert_eq!(haptics.strength, Some(Strength { lightest: 0.25, strongest: 0.75 }), "past three quarters the motor rattles");
         assert_eq!(cfg.backup.efs, ["modemst1", "modemst2", "fsg", "fsc", "persist"]);
         assert!(cfg.backup.data_skipped.contains(&"vendor/goodix".to_string()));
         assert!(cfg.wipe.logs.contains(&"/data/vendor/bsplog".to_string()));

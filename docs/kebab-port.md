@@ -531,11 +531,27 @@ cnss: fatal: Timeout waiting for FW ready indication
 - recovery 里没有 keystore2 守护进程，CE 解密由 Skyward 自己按上面的链路完成
 - 长错误信息以前会横向超出屏幕，现已改为按屏幕宽度换行（`widgets::toast`）
 
-### 8.4 振动
+### 8.4 振动（已可用，2026-11-18）
 
-AW8697 暴露 `/sys/class/leds/vibrator`（`duration` + `activate`），而 `skyward/src/haptics.rs` 走 evdev force-feedback。当前 `devices/kebab.toml` 不配置 `[haptics]`，功能不受影响，只是没有震动反馈。
+AW8697 由内核的 `aw8697_haptic` 驱动，暴露为 LED class：`/sys/class/leds/vibrator/{state,duration,activate,gain}`。Skyward 已新增 LED 后端（`[haptics] led = "..."`），与高通 `vendor.qcom.opensource.vibrator` 的 OL 实现一致：
 
-需要：增加 LED-class 后端（几十行），或保持不配置。
+```sh
+echo 1 > state      # 先置 state
+echo 10 > duration  # ms；<=500 走短波形表，索引由 duration 决定
+echo 1 > activate   # 开始播放
+```
+
+- 点击：10 ms（与 Lineage 设备 overlay 的 `config_virtualKeyVibePattern` 一致）
+- 熄屏双击：两次 10 ms，间隔 60 ms（驱动一次只播一个片段）
+- 强度：`gain` 0x01–0x75（0x00 不振）；滑块映射约 0x2F–0x75，默认档约 0x33，实测手感与 `gain=0x30` 相当
+- 官方振动 HAL 不写 `gain`，所以系统里的强度设置对这台机器的开环马达本来就不起作用；Skyward 的滑块直接驱动它
+
+复现：`/tmp/skyward haptic --config /skyward/device.toml [--position 0.5] [--ticks]`
+
+#### 8.4.1 仍未完成
+
+- 没有实现 HAL 的 `perform(effect)`/`compose` 波形表（长按、双击等组合效果）；目前用点击/双 tick 两种
+- 长振动（>500 ms）会走长波形片段，Skyward 暂未用到
 
 ### 8.5 双系统
 

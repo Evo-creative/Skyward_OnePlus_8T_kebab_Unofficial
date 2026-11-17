@@ -29,7 +29,51 @@ const TICKS_REST: Duration = Duration::from_millis(40);
 /// playing after its samples have run out, even when told to stop, until
 /// the click is taken away. So each click is loaded as it is played, at the
 /// strength the slider gives, and taken away once it has played out.
-pub struct Haptics {
+pub(crate) struct Haptics {
+    motor: Motor,
+}
+
+/// How the phone's kernel drives the motor.
+enum Motor {
+    /// Through the kernel's force-feedback events.
+    Force(Force),
+    /// As a light: a duration, then a word that starts it, one clip at a
+    /// time.
+    Led(Led),
+}
+
+impl Haptics {
+    /// The motor this phone's configuration describes, in the form its
+    /// kernel drives it.
+    pub fn open(cfg: &skyward_config::Haptics) -> Result<Haptics> {
+        let strength = cfg.strength.unwrap_or(skyward_config::Strength::DEFAULT);
+        let motor = match &cfg.led {
+            Some(dir) => Motor::Led(Led::open(dir, strength)?),
+            None => Motor::Force(Force::open(cfg)?),
+        };
+        Ok(Haptics { motor })
+    }
+
+    /// One short click at the strength the slider's `position` gives.
+    /// Gives how long it plays.
+    pub fn click(&mut self, position: f32) -> Result<Duration> {
+        match &mut self.motor {
+            Motor::Force(force) => force.click(position),
+            Motor::Led(led) => led.click(position),
+        }
+    }
+
+    /// The ticks of the screen going off. Gives how long they play.
+    pub fn ticks(&mut self) -> Result<Duration> {
+        match &mut self.motor {
+            Motor::Force(force) => force.ticks(),
+            Motor::Led(led) => led.ticks(),
+        }
+    }
+}
+
+/// A motor the kernel's force-feedback events drive.
+struct Force {
     dev: File,
     click: Click,
     ticks: Click,
@@ -50,13 +94,15 @@ enum Click {
     Samples { data: Vec<i8>, rate: u32 },
 }
 
-impl Haptics {
+impl Force {
     /// The force-feedback device and the configured click. Loading a click
     /// fills the driver's queue with what it plays, so the click is loaded
     /// only as it is played.
-    pub fn open(cfg: &skyward_config::Haptics) -> Result<Haptics> {
+    fn open(cfg: &skyward_config::Haptics) -> Result<Force> {
         let (path, dev) = motor()?;
-        let hz = resonance(&cfg.resonance)?;
+        let file = cfg.resonance.as_deref().context("the configuration does not say where the motor's resonant frequency is read")?;
+        let strength = cfg.strength.unwrap_or(skyward_config::Strength::DEFAULT);
+        let hz = resonance(file)?;
         let click = match cfg.click {
             Some(id) => {
                 eprintln!("haptics {}: clicks with waveform {id}, ticks made for a motor swinging at {hz} Hz", path.display());
@@ -68,18 +114,18 @@ impl Haptics {
             }
         };
         let ticks = Click::Samples { data: ticks(hz), rate: TICKS_RATE };
-        Ok(Haptics { dev, click, ticks, strength: cfg.strength, playing: Arc::new(Mutex::new(None)), clicks: 0 })
+        Ok(Force { dev, click, ticks, strength, playing: Arc::new(Mutex::new(None)), clicks: 0 })
     }
 
     /// One short click at the strength the slider's `position` gives, after
     /// taking away one still playing. Gives how long it plays.
-    pub fn click(&mut self, position: f32) -> Result<Duration> {
+    fn click(&mut self, position: f32) -> Result<Duration> {
         self.start(false, share(&self.strength, position))
     }
 
     /// The ticks of the screen going off, as strong as the phone's own
     /// system plays them whatever the slider says. Gives how long they play.
-    pub fn ticks(&mut self) -> Result<Duration> {
+    fn ticks(&mut self) -> Result<Duration> {
         self.start(true, TICKS_STRENGTH)
     }
 
@@ -116,6 +162,77 @@ impl Haptics {
     }
 }
 
+/// A motor the kernel shows as a light, as the phone's own vibrator service
+/// drives it: a file that says how long the next vibration lasts, one that
+/// starts it, and one the motor's strength is set by. The driver plays one
+/// clip at a time, and the clip it picks grows with the duration asked for,
+/// so a click is the shortest it has.
+struct Led {
+    dir: PathBuf,
+    strength: Strength,
+}
+
+impl Led {
+    /// How long a click plays, as the phone's own system plays one.
+    const CLICK_MS: u32 = 10;
+    /// How long each of the two ticks of the screen going off plays, and
+    /// how long after the first the second comes: the driver plays one clip
+    /// at a time, and a clip takes a moment to end.
+    const TICK_MS: u32 = 10;
+    const TICK_GAP: Duration = Duration::from_millis(60);
+    /// The most the driver takes, and the least that still moves the motor.
+    const FULL_GAIN: f32 = 0x75 as f32;
+    const LEAST_GAIN: f32 = 0x01 as f32;
+
+    fn open(dir: &str, strength: Strength) -> Result<Led> {
+        let dir = PathBuf::from(dir);
+        ensure!(dir.join("activate").is_file(), "{} holds no activate file", dir.display());
+        Ok(Led { dir, strength })
+    }
+
+    fn write(&self, file: &str, value: &str) -> Result<()> {
+        let path = self.dir.join(file);
+        fs::write(&path, value).with_context(|| format!("write {value} to {}", path.display()))
+    }
+
+    /// A share of the full strength as the number the driver takes: what the
+    /// slider's ends are set to, rising with it as the click's does, and
+    /// never so low that the motor does not move.
+    fn gain(&self, share: f32) -> Result<()> {
+        let value = (share.clamp(0.0, 1.0) * Self::FULL_GAIN).round().clamp(Self::LEAST_GAIN, Self::FULL_GAIN) as u32;
+        self.write("gain", &format!("{value:#x}"))
+    }
+
+    /// Play one clip of `ms` at `share` of the full strength, as the phone's
+    /// own service plays one: the state first, the duration, then the word
+    /// that starts it.
+    fn play(&self, ms: u32, share: f32) -> Result<()> {
+        self.write("state", "1")?;
+        self.gain(share)?;
+        self.write("duration", &ms.to_string())?;
+        self.write("activate", "1")
+    }
+
+    fn click(&mut self, position: f32) -> Result<Duration> {
+        self.play(Self::CLICK_MS, share(&self.strength, position))?;
+        Ok(Duration::from_millis(u64::from(Self::CLICK_MS)))
+    }
+
+    fn ticks(&mut self) -> Result<Duration> {
+        self.play(Self::TICK_MS, TICKS_STRENGTH)?;
+        // The second tick comes once the first has ended, from a thread of
+        // its own so the screen's loop does not wait for it.
+        let led = Led { dir: self.dir.clone(), strength: self.strength };
+        std::thread::spawn(move || {
+            std::thread::sleep(Self::TICK_GAP);
+            if let Err(e) = led.play(Self::TICK_MS, TICKS_STRENGTH) {
+                eprintln!("play the second tick: {e:#}");
+            }
+        });
+        Ok(Self::TICK_GAP + Duration::from_millis(u64::from(Self::TICK_MS)))
+    }
+}
+
 /// Play the configured click once at the slider's `position`, or else the
 /// ticks of the screen going off, saying how strongly and for how long, for
 /// trying out a motor.
@@ -124,7 +241,7 @@ pub fn probe(cfg: &skyward_config::Haptics, position: f32, ticks: bool) -> Resul
     let (what, strength, length) = if ticks {
         ("ticks", TICKS_STRENGTH, haptics.ticks()?)
     } else {
-        ("click", share(&cfg.strength, position), haptics.click(position)?)
+        ("click", share(&cfg.strength.unwrap_or(skyward_config::Strength::DEFAULT), position), haptics.click(position)?)
     };
     // Once it has played out, what played goes with the device as the
     // command ends.

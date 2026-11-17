@@ -27,6 +27,15 @@ load = []
 [partitions]
 mounted = ["persist"]
 
+# The motor is an AW8697, which the kernel shows as a light: a duration,
+# a strength and the word that starts it, one clip at a time. The phone's
+# own system plays a click as 10 ms of the shortest clip, as its framework's
+# virtual key pattern says, and sets no strength; the slider here drives the
+# motor's gain from about 0x2F to the 0x75 the driver takes at most.
+[haptics]
+led = "/sys/class/leds/vibrator"
+strength = { lightest = 0.4, strongest = 1.0 }
+
 # The phone goes into the crash dump, and from there its bootloader's
 # emergency download mode, once its screen goes dark: neither the kernel's
 # s2idle suspend nor the panel coming back from rest is reliable here yet.
