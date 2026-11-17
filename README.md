@@ -12,6 +12,48 @@ Skyward is a recovery written in Rust, from scratch.
   <img src="assets/time-zone.png" width="30%" alt="Time zone">
 </p>
 
+## Building for the OnePlus 8T (kebab)
+
+This fork builds Skyward for the OnePlus 8T (kebab), on the stock recovery of the
+LineageOS 24.0 package for this phone. What was tried and what broke is in
+[docs/kebab-port.md](docs/kebab-port.md).
+
+Against Skyward, this port adds a Keymaster 4.x HIDL client (kebab has no KeyMint
+AIDL), boot header v2, an AW8697 LED haptics backend, a DRM recovery event so a
+failed panel commit no longer panics into EDL, unmounting the data partition from
+the decrypt page, and a status-bar clock moved past the punch hole. It lacks
+Wi-Fi, Skyward's online update and dual boot.
+
+| Status | What |
+|---|---|
+| Verified on the phone | boot, 120 Hz UI, touch, backlight, vibration, `/data` decryption (users 0 and 10), file manager, MTP, adb, screenshots, time zones, the clock past the punch hole |
+| Built, not verified | unmounting and decrypting `/data` again, holding erase to clear a code, backup/restore, images, zips and payload OTAs, erase/format/factory reset, fastbootd, slot switching, AVB, language switching, search and theme, partition pages, "Flash Skyward again" |
+| Not implemented | Wi-Fi (the supplicant's vendor AIDL service will not register), vibration waveforms |
+| Not possible | dual boot (no `init_boot`); Skyward's online update for a third-party port |
+
+Build with `cache/recovery.img` from the LineageOS 24.0 kebab zip. Verified boot
+must be off, and only the recovery partition is written:
+
+```sh
+cargo ndk -t arm64-v8a --platform 30 build --release -p skyward
+RUSTFLAGS="-C target-feature=+crt-static" cargo ndk -t arm64-v8a --platform 30 build --release -p skyward-system-init --target-dir target/system-init
+cargo build --release -p skyward-pack
+target/release/skyward-pack recovery --stock cache/recovery.img \
+  --binary target/aarch64-linux-android/release/skyward \
+  --system-init target/system-init/aarch64-linux-android/release/system-init \
+  --config devices/kebab.toml \
+  --font resources/fonts/MiSans-Subset.ttf \
+  --mono resources/fonts/KirkMono-Regular.ttf \
+  --mono-license resources/fonts/KirkMono-OFL.txt \
+  --size 104857600 --out cache/skyward-kebab-100.img
+adb reboot bootloader
+fastboot flash recovery cache/skyward-kebab-100.img
+fastboot reboot recovery
+```
+
+Do not lock the bootloader. The details, including getting out of EDL, are in
+[docs/kebab-port.md](docs/kebab-port.md).
+
 ## Features
 
 ### Dual boot
