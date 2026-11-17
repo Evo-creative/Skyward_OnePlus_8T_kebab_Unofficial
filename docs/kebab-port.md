@@ -1,12 +1,13 @@
 # Skyward 移植到 OnePlus 8T（kebab）记录
 
-日期：2026-11-17
+日期：2026-11-18（首版 2026-11-17）
 基线：Skyward v0.3.1（`crates/` 工作区），LineageOS 24.0 的 `recovery.img`
 
 ## 1. 现状摘要
 
 结论：**Skyward 在 kebab 上已能完整使用**：UI、120Hz、触摸、背光、振动、`/data` 解密（含用户 CE）、
-文件管理、MTP（需先解密）、分区操作、日志与 SELinux 修复。
+`/data` 卸载与重新解密、文件管理、MTP（需先解密）、分区操作、日志与 SELinux 修复；
+输入长密码时按住删除键可清空整个输入框。
 **Wi-Fi 搁置**：驱动、校准、`wlan0` 都已打通，只差 supplicant 的 vendor AIDL 注册；
 recovery 联网除 Skyward 自更新外没有用途，而本移植无法提供该更新，详见 §8.1。
 双系统因无 `init_boot` 而不可行（已加保护）。
@@ -19,7 +20,7 @@ recovery 联网除 Skyward 自更新外没有用途，而本移植无法提供�
 |---|---|---|
 | 刷入 recovery 分区后启动 | ✅ | 修 `recovery_dtbo_offset` 后成功（`682cc60`） |
 | `fastboot boot` 临时启动 | ✅ | 全程可用 |
-| 启动到 UI | ✅ | `the pages speak En` |
+| 启动到 UI | ✅ | `the pages speak Hans`（按系统语言选择） |
 | A/B 槽位识别 | ✅ | `slot_suffix=_a`，super 映射正常 |
 | 槽位切换（boot control HAL） | 🟡 | 代码在，未实机操作 |
 | 双系统 | ❌ | 无 `init_boot`；已加库级保护（`d873027`） |
@@ -35,6 +36,7 @@ recovery 联网除 Skyward 自更新外没有用途，而本移植无法提供�
 | 触摸 | ✅ | Synaptics S3908，evdev `input2` |
 | 背光 / 亮度 | ✅ | `panel0-backlight`，normal-max 修复（`af3ceb5`） |
 | 振动 | ✅ | AW8697 走 `/sys/class/leds/vibrator`；新增 LED 后端，点击/开关/键盘/滑块/熄屏双击都有反馈（`56530ac`、`7606a6a`） |
+| 锁屏输入：长按删除清空 | 🟡 | 数字与字母键盘的「删除」按住约 0.4 s 清空整个输入框；单元测试覆盖，实机手感待试（`a1ffc1a`） |
 | 语言切换（简/繁/英） | 🟡 | 字体子集已覆盖 UI 全部字符，实机未切换 |
 | 字体显示 | ✅ | MiSans 子集，ramdisk 39.3 → 27.2 MiB（`00b9f39`） |
 | 搜索 / 主题 / 时区 | 🟡 | 代码就绪，未逐项验证 |
@@ -56,6 +58,8 @@ recovery 联网除 Skyward 自更新外没有用途，而本移植无法提供�
 | **`/data` 解密（FBE+metadata）** | ✅ | Keymaster 4.x HIDL 客户端已实现；metadata key、wrapped key、dm-default-key、用户 CE 全部打通（见 §8.3） |
 | 文件管理器（内部存储） | ✅ | `/data` 打开后可浏览 |
 | MTP（内部存储） | ✅ | 已在 Nautilus 中实测：`/data` 解锁后电脑能看到并读写内部存储（2026-11-18） |
+| **卸载 `/data`（解密页）** | ✅ | 滑动「卸载」→ 先收回 MTP，再结束占用进程、卸载 `/data` 与 `/sdcard`、移除 dm 映射（`1cb4975` 起）。卸载动作已实测；修正后的「未挂载」页与「解密 data 分区」按钮待复查（`689854d`） |
+| 卸载后重新解密 | 🟡 | 重新点「解密 data 分区」或离开再进入解密页都会重新打开；单元测试覆盖，待实机确认 |
 
 ### 1.4 连接与网络
 
@@ -69,8 +73,8 @@ recovery 联网除 Skyward 自更新外没有用途，而本移植无法提供�
 
 ### 1.5 量化
 
-- **完全可用**：启动、UI、120Hz、触摸、背光、振动、`/data` 解密、内部存储文件管理、分区挂载、adb、日志、SELinux 修复、About、字体
-- **代码就绪待验证**：槽位切换、备份/恢复、刷写、fastbootd、语言切换（按约定暂不逐项实测）
+- **完全可用**：启动、UI、120Hz、触摸、背光、振动、`/data` 解密、`/data` 卸载、内部存储文件管理、分区挂载、adb、日志、SELinux 修复、About、字体
+- **代码就绪待验证**：槽位切换、备份/恢复、刷写、fastbootd、语言切换、搜索/主题/时区、截图、卸载后的未挂载页与长按清空（按约定暂不逐项实测）
 - **未实现 / 受阻**：Wi-Fi 完整（唯一功能缺口）、在线更新（依赖 Wi-Fi）、双系统（无 `init_boot`）
 
 ### 1.6 阻塞项
@@ -80,7 +84,6 @@ recovery 联网除 Skyward 自更新外没有用途，而本移植无法提供�
 | Wi-Fi supplicant 的 AIDL 注册 | Wi-Fi 与 Skyward 自更新 | 给 recovery 一个最小的 vendor 服务目录，见 §8.1 |
 | 无 `init_boot` | 双系统 | 重新设计第二系统 first-stage 存放方式 |
 | 显示提交超时 | 以前会 panic → EDL | 已注册 DRM 恢复事件（§8.3.3）；待观察是否还有超时 |
-| AW8697 接口 | 振动 | LED-class 后端（小改动） |
 
 ## 2. Skyward 的工作方式（与本机相关部分）
 
@@ -145,7 +148,7 @@ backlight        panel0-backlight, max_brightness = 2047
 ```
 芯片             QCA6390（qca6390 profile）
 驱动             qca_cld3_wlan 内建；cnss2 / QMI
-触发             /sys/kernel/cnss/fs_ready = 1
+触发             /sys/kernel/cnss/fs_ready = 1（当前搁置，不再写入）
 固件             /vendor/firmware_mnt/image/qca6390/
                  ├─ amss20.bin
                  ├─ bdwlan.elf
@@ -154,7 +157,8 @@ backlight        panel0-backlight, max_brightness = 2047
 运行配置         /vendor/firmware/wlan/qca_cld/{WCNSS_qcom_cfg.ini,wlan_mac.bin}
 persist          /mnt/vendor/persist/{bdwlan.elf,bdwlanu.elf,wlan_mac.bin,wlan/}
 supplicant       /vendor/bin/hw/wpa_supplicant（3.8 MB）
-AIDL 服务        android.hardware.wifi.supplicant.ISupplicant/default（已注册）
+AIDL 服务        android.hardware.wifi.supplicant.ISupplicant/default
+                 （注册失败，进程随后退出；见 §8.1）
 ```
 
 ### 3.4 加密与安全
@@ -243,6 +247,11 @@ KirkMono-Regular.ttf   264 KB / 142 KB
 | `7606a6a` | 每次「点一下就生效」的交互都振（开关、跳转行、键盘、按键选中） |
 | `41b6128` | 启动时把 pstore 的上次记录复制到 `/metadata/skyward/crash/` |
 | `445037e`/`af0fbc1` | 显示超时不再 panic：注册 `DRM_EVENT_SDE_HW_RECOVERY`；面板不再 rest/关断 |
+| `037f0bd` | Wi-Fi 整体搁置：`[wlan]` 与 `qrtr-ns`/`cnss-daemon`/`vndservicemanager` 注释保留，不写 `fs_ready` |
+| `1cb4975` | 解密页加「卸载 data 分区」：滑动确认 → 收回 MTP → `wipe::release_data()` |
+| `041ec38`/`df28d48` | 文案改为「卸载」；代码标识统一为 `umount`（对照 `mount::umount`） |
+| `689854d` | 卸载后显示「data 分区未挂载」与「解密 data 分区」按钮，不再误显示为正在读取锁屏 |
+| `a1ffc1a`/`f8aa253` | 长按删除清空输入框；同时试过的「点变密 + 省略号」已按用户要求回滚 |
 
 ### 4.1 为什么需要 boot header v2
 
@@ -267,15 +276,15 @@ v2 布局多了 `recovery_dtbo` 与 `dtb`，只按 v3 重建会丢掉它们。
 [display] width = 1080, height = 2400, density = 450, diagonal = 6.55, corner_radius = 24
 [modules] sources = ["vendor"], load = []       # 无 vendor_boot/vendor_dlkm；驱动基本内建
 [partitions] mounted = ["persist"]
+[haptics] led = "/sys/class/leds/vibrator"      # AW8697；见 §8.4
+          strength = { lightest = 0.4, strongest = 1.0 }
+[power]   blank = false, suspend = false, rest = false   # 显示超时不再 panic 的配套设置
 [firmware] partition = "modem"
-[wlan] modules = [], writes = fs_ready = 1, interface = "wlan0",
-       supplicant = "/vendor/bin/hw/wpa_supplicant",
-       service = "android.hardware.wifi.supplicant.ISupplicant/default",
-       probe = "http://connectivitycheck.gstatic.com/generate_204"
-[backup] efs = [modemst1, modemst2, fsg, fsc, persist]
+[backup] efs = ["modemst1", "modemst2", "fsg", "fsc", "persist"]
+# [wlan] 与它需要的 qrtr-ns、cnss-daemon、vndservicemanager 三个服务已整体注释（§8.1）
 ```
 
-未配置 `[haptics]`（见 §8.4）。
+场景说明：`[power]` 三个关闭项是 EDL 问题的配套设置（§8.3.3）；`[haptics]` 使用 LED 后端（§8.4）。
 
 ## 5. 构建与打包
 
@@ -311,7 +320,8 @@ target/release/skyward-pack recovery \
   --font resources/fonts/MiSans-Subset.ttf \
   --mono resources/fonts/KirkMono-Regular.ttf \
   --mono-license resources/fonts/KirkMono-OFL.txt \
-  --out skyward-kebab.img
+  --size 104857600 \
+  --out cache/skyward-kebab-100.img
 ```
 
 ### 5.1 体积预算（实测）
@@ -332,18 +342,18 @@ target/release/skyward-pack recovery \
 | 组成 | MiB |
 |---|---|
 | kernel | 54.28 |
-| ramdisk | 27.19 |
+| ramdisk | 27.21 |
 | recovery_dtbo | 0.84 |
 | dtb | 1.36 |
 | header + vbmeta + footer | 0.01 |
-| **合计** | **83.68** |
+| **合计** | **83.70** |
 
 stock 镜像大小 96.00 MiB，实际分区 100.00 MiB；用子集后余量 **12.32 MiB**（完整字体时 4.19 MiB）。
 
 ramdisk 内新增：
 
 ```
-system/bin/recovery                8,805,096 B   （Skyward）
+system/bin/recovery                8,851,408 B   （Skyward）
 system/bin/{7za,avbctl,resetprop,unzip,zstd}    → recovery 的符号链接
 skyward/system-init                1,040,856 B
 skyward/device.toml
@@ -398,15 +408,20 @@ syna-tcm probe 成功；input2 touchpanel、input3 touchpanel_kpd
 fps_report_rate: 60 / 90 / 120
 ```
 
-## 7. 当前镜像的启动方式
+## 7. 当前镜像的刷入方式
+
+bootloader 的验证保持关闭（§8.6），此时必须把镜像写进 recovery 分区；`fastboot boot` 不再使用：
 
 ```bash
-# 不写分区，最安全
 adb reboot bootloader
-fastboot boot /tmp/opencode/skyward-kebab.img
+fastboot flash recovery cache/skyward-kebab-100.img
+fastboot reboot recovery
 ```
 
-注意：`fastboot boot` 会让内核命令行带上 `androidboot.mode=fastboot`（与正常启动的 `androidboot.mode=reboot` 不同），见 §8.1。
+早期用 `fastboot boot` 时，内核命令行带着 `androidboot.mode=fastboot`（与正常启动的 `androidboot.mode=reboot` 不同）；
+现在刷分区启动，与正常系统一致。
+
+镜像来自 §5 的打包命令：100 MiB 分区、子集字体、`--size 104857600`。
 
 ## 8. 已知问题
 
@@ -584,6 +599,7 @@ cnss: fatal: Timeout waiting for FW ready indication
 - 关闭 File transfer 可恢复 adb（已验证：`18d1:d001` → adb 正常）
 
 **已复测（2026-11-18）**：File transfer 打开、`/data` 解锁后，Nautilus 能看到设备并读写内部存储，正常。
+从解密页卸载 `/data` 时先收回 MTP 的内部存储（`withhold`），电脑只保留设备；重新解密后恢复。
 
 ### 8.3 Data 解密（已可用，2026-11-17 深夜实机验证）
 
@@ -719,7 +735,7 @@ kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。�
 
    ```bash
    fastboot --disable-verity --disable-verification flash vbmeta vbmeta.img
-   fastboot flash recovery skyward-kebab.img
+   fastboot flash recovery cache/skyward-kebab-100.img
    ```
 
 2. 出现 `image destroyed` 提示时，用**同一个 ROM 包**里的 `vbmeta.img`、`boot.img`、`dtbo.img`
@@ -736,40 +752,60 @@ kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。�
 
 ## 9. 下一步
 
-> 2026-11-17 收尾状态：**Wi-Fi 暂停**。实机反复触发 `fs_ready` 会走 cnss2 的失败路径
-> （`CNSS_ASSERT`），导致设备进入 `05c6:900e`（crashdump/EDL）。后续应先离线分析，再上机。
+> 2026-11-18 状态：`/data` 解密、卸载与重新解密、振动、MTP 均可用；Wi-Fi 已搁置。
+> 剩下的分三类：少数界面待复查、按约定暂不实测的功能、以及可选改进。
 
-> 2026-11-18 状态：**Data 解密已通**（含用户 CE），振动已通（LED 后端 + 全交互反馈）。
-> 只剩 Wi-Fi，以及几项需要上机确认的功能。
+### 9.1 已完成（本轮）
 
-按优先级：
+- ~~Wi-Fi~~ 已搁置（`037f0bd`）：见 §8.1。驱动、校准、`wlan0` 都能起来，
+  只差 supplicant 的 vendor AIDL 注册；recovery 联网除自更新外没有用途。
+  配置与三个服务整体注释保留。
+- ~~复测 MTP~~ 已完成（2026-11-18）：见 §8.2。
+- ~~UI 卸载 data 分区~~ 已完成（`1cb4975`…`689854d`）：解密页滑动卸载，
+  先收回 MTP，再结束占用进程、卸载 `/data` 与 `/sdcard`、移除 dm 映射；
+  卸载后显示「data 分区未挂载」与「解密 data 分区」按钮。
+- ~~长按删除清空输入~~ 已完成（`a1ffc1a`）：数字与字母键盘均可；
+  同时试过的「点变密 + 省略号」已按用户要求回滚（`f8aa253`）。
+- ~~Keymaster 4.x HIDL 客户端~~ 已完成（`bfe5a64` 起，见 §8.3）。
+- ~~LED 振动后端~~ 已完成（见 §8.4）。
+- ~~字体子集化~~ 已完成（见 §3.6）。
 
-1. ~~Wi-Fi~~ **已搁置**（2026-11-18）：见 §8.1，只剩 supplicant 的 AIDL 注册；配置整体注释保留。
-   恢复时要做的：
-   - 在 `078365e5318d`（本机内核提交）上读 `hdd_wlan_startup` / `cnss_pci_dev_powerup` 的完整调用链
-   - 找出不依赖 wifi HAL 的触发方式（ioctl / sysfs / 驱动注册时序）
-   - 上机时**每次启动只写一次 `fs_ready`**，且 `cnss-daemon` 以 system 用户 + 正确组启动
-   - 相关服务目前已在 `devices/kebab.toml` 注释掉，避免 `CNSS_ASSERT` → EDL
-2. ~~复测 MTP~~ 已完成（2026-11-18）：data 解锁后电脑可读写内部存储。
-   注意 MTP 只有在 data 分区打开后才提供内部存储（`storage_open()`），否则电脑只看到设备、看不到存储；
-   首页「文件传输」下方的脚注已写明这一点
-3. **暂不实测**：备份/恢复、刷写、fastbootd、槽位切换 —— 按用户要求先记着，代码路径都在，不做逐项实机验证
-4. ~~UI 加「卸载 data 分区」~~ 已完成（`1cb4975`，2026-11-18）
-   - 解密页在 data 打开时显示说明与「滑动以卸载 data 分区」；安装、擦除、备份、
-     文件操作、修复、第二系统等任一进行中时入口隐藏
-   - 执行：先 `withhold` 收回 MTP 的内部存储，再在 worker 里调
-     `wipe::release_data()`（结束占用进程 → 卸载 `/data`、`/sdcard` → `data::close()` 移除 dm 映射）；
-     成功后状态回到 `Data::Closed`，文件管理与 MTP 一并失效；解密页显示「data 分区未挂载」
-     并给出「解密 data 分区」按钮（不再自动重新打开），离开页面再进入也会重新解密
-   - 底层与 CLI 早已存在：`wipe::release_data()`、`skyward data --close`，
-     自动用于擦除、格式化/修复文件系统、安装/更新前
-4. ~~Keymaster 4.x HIDL 客户端~~ 已完成（`bfe5a64` 起，见 8.3）
-5. ~~LED 振动后端~~ 已完成（见 8.4）
-6. ~~字体子集化~~ 已完成
+### 9.2 待上机复查（已实现，未最终确认）
 
-不在计划内：双系统（kebab 没有 `init_boot`，需重新设计，见 8.5）
+1. **卸载后的「未挂载」页**（`689854d`）：滑到「data 分区未挂载」后，
+   点「解密 data 分区」应进入密码/图案；离开再进入解密页也应重新解密。
+   之前这里误显示「正在读取锁屏方式」，已修。
+2. **卸载后 MTP 行为**：电脑上的内部存储应消失，重新解密后恢复。
+3. **长按删除清空**（`a1ffc1a`）：按住约 0.4 s，松手不额外删一个字符。
+4. **语言切换（简/繁/英）**：字体子集覆盖 UI 字符，未实际切换过。
+5. **搜索 / 主题 / 时区**：代码就绪，未逐项操作。
+6. **截图 `Capture`**：未验证。
+7. **分区浏览**：`mount` / `lp` 的页面未细测。
+8. **「Flash Skyward again」**：会写 recovery，未验证。
+9. **显示超时观察**：若面板偶发超时，日志应出现 SDE register dump 但不再进 EDL（§8.3.3）。
 
-## 9.1 安全事项（务必遵守）
+### 9.3 按约定暂不实测（代码路径都在）
+
+- 备份 / 恢复（`[backup]`：modemst1/2、fsg、fsc、persist；data 按设计跳过）
+- 刷镜像 / zip / payload OTA
+- fastbootd
+- 槽位切换
+- 擦除 / 格式化 / 工厂重置
+- AVB 处理（`avbctl` 符号链接已注入）
+
+这些都会实际写分区，按用户要求只保留代码，不做逐项实机验证。
+
+### 9.4 可选改进
+
+- **Wi-Fi**（若以后要做）：在 `skyward-binder` 里实现最小的 vendor 服务目录
+  （`BINDER_SET_CONTEXT_MGR` + 对 `addService` 回 OK），或临时 `LD_PRELOAD` shim；
+  之后还要实测扫描、连接、DHCP、路由与联网检测。详见 §8.1。
+- **AVB 签名**：给打包器加签名（测试密钥），或同时产出禁用校验的 vbmeta 与安装说明（§8.6）。
+- **振动波形**：实现 HAL 的 `perform(effect)` / `compose`，可做长按、双击等组合效果（§8.4.1）。
+- **字体**：文件/SSID/终端里的生僻字仍是方框，可按需扩充子集（§3.6）。
+- **双系统**：kebab 没有 `init_boot`，需要重新设计第二系统 first-stage 的存放方式（§8.5）。
+
+### 9.5 安全事项（务必遵守）
 
 - 首次刷写前备份 `recovery_a`；恢复需要**同一构建**的 `vbmeta.img`、`boot.img`、`dtbo.img`
 - 只在 verity 关闭（`vbmeta_a` flags=3）时刷未签名镜像
