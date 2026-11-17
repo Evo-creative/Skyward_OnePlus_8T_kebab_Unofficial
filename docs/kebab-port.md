@@ -411,10 +411,21 @@ fastboot boot /tmp/opencode/skyward-kebab.img
 
 ### 8.1 Wi-Fi 不启动（主要未完成项）
 
-> 当前状态（2026-11-18）：固件加载、QMI 握手、冷启动校准均已通过，
-> 但**没有进入 mission 模式**，因此没有 `wlan0`。详见 §8.1.1。
-> **`qrtr-ns` 与 `cnss-daemon` 已从 `devices/kebab.toml` 注释掉**：反复驱动会触发
-> `CNSS_ASSERT` 并让设备进 EDL，等离线分析清楚再恢复。
+> 当前状态（2026-11-18 晚）：**mission 模式已打通，`wlan0` 已出现**
+> （还带出 `p2p0`、`wifi-aware0`），MAC 从 `wlan_mac.bin` 读到。
+> 决定性的一步：向 **`/dev/wlan` 写入 `"ON"`**（qcacld 的 `wlan_hdd_state` 开关），
+> 它会调用 `hdd_driver_load()` → `cnss_wlan_register_driver()`，
+> 并在冷启动校准进行中时等待校准完成再探测芯片。之前只「打开」了这个设备节点，没有写 `ON`。
+>
+> 复现步骤（本次启动只写一次 `fs_ready`）：
+>
+> ```sh
+> # /data 已解锁，且 qrtr-ns、cnss-daemon 在运行（daemon 需要 /data/vendor/wifi/sockets）
+> /tmp/skyward wlan-up      # 写 fs_ready → 等 2s → 写 ON → 等 wlan0
+> ```
+>
+> `cnss-daemon` 若因 `/data/vendor/wifi/sockets` 不存在而退出，会在目录建好后由服务目录重新拉起；
+> 该目录由 `wlan.rs` 在 bring-up 时创建（`system:system 0770`）。
 > 下方「现象」是最初的记录，保留作为对照。
 
 #### 8.1.1 进展（2026-11-17 晚，实机验证）
