@@ -524,11 +524,12 @@ cnss: fatal: Timeout waiting for FW ready indication
 - **`TAG_*` 常量**：注意 TagType 前缀（ENUM=`0x1……`、ENUM_REP=`0x2……`、UINT=`0x3……`、BOOL=`0x7……`、BYTES=`0x9……`），写错会得到 `UNSUPPORTED_ALGORITHM(-4)` 之类的误导性错误。
 - **blob 前缀**：keystore2 写的 blob 都是 `pKMblob\0` + HAL blob，交给 HAL 前必须去掉 8 字节。
 
-#### 8.3.2 仍未完成
+#### 8.3.2 实机结果与仍未完成
 
-- 用户 10（工作资料）的旧密钥：已实现 `upgradeKey` 重试，待再次输入密码验证
+- 已验证：`/data` 挂载（`dm-5`，`inlinecrypt`），输入密码后 user 0 与 user 10 的 CE 文件都打开（`/data/data`、`/data/user/10`、`/data/media/0` 可读）
+- 旧固件生成的密钥（`-62 KEY_REQUIRES_UPGRADE`）会自动 `upgradeKey` 后重试
 - recovery 里没有 keystore2 守护进程，CE 解密由 Skyward 自己按上面的链路完成
-- 解密失败时 UI 弹窗文字被截断（显示不全），需要检查弹窗布局
+- 长错误信息以前会横向超出屏幕，现已改为按屏幕宽度换行（`widgets::toast`）
 
 ### 8.4 振动
 
