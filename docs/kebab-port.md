@@ -531,6 +531,30 @@ cnss: fatal: Timeout waiting for FW ready indication
 - recovery 里没有 keystore2 守护进程，CE 解密由 Skyward 自己按上面的链路完成
 - 长错误信息以前会横向超出屏幕，现已改为按屏幕宽度换行（`widgets::toast`）
 
+### 8.3.3 进 EDL（05c6:900e）的根因：显示驱动超时后 panic（2026-11-18 定位）
+
+日志末尾是 `sde_dbg:[sde_evtlog_dump_all]` 与 `_sde_dump_reg_by_ranges`，即 SDE 的寄存器 dump。内核里这条路径是：
+
+```
+sde_encoder_phys_cmd_handle_ppdone_timeout / poll_timeout_wr_ptr 超时
+  → 没有程序注册 DRM_EVENT_SDE_HW_RECOVERY（recovery 里没有 SurfaceFlinger）
+  → SDE_DBG_DUMP("dsi_dbg_bus", "panic")
+  → sde_dbg.c: _sde_dump_array(..., do_panic=true) → panic(name)
+  → CONFIG_PANIC_TIMEOUT=5 → 复位 → bootloader 进 900e
+```
+
+`sde_dbg` 的 `panic_on_err` 默认就是 1（`DEFAULT_PANIC`），而 Android 里 SurfaceFlinger 会监听恢复事件、驱动只 capture 不 panic；recovery 里没人监听，所以**任何一次提交超时都直接把内核干掉**。
+
+处置（已在 `445037e` 加入）：
+
+1. 打开 DRM 后、第一次提交前，把每张卡的 `/sys/kernel/debug/dri/<n>/debug/panic` 写成 0：失败只 dump、不 panic
+   （`ui.rs::let_display_errors_go`，挂 debugfs 后逐个写）
+2. `[power] rest = false`：面板永不休眠/关断，只把背光降到 0、显示黑帧，减少会失败的提交种类
+
+诊断支持：每次启动把 pstore（ramoops）里的上次崩溃记录复制到 `/metadata/skyward/crash/`，见 `crash.rs`。
+
+仍需观察：若面板仍偶发超时，日志里会出现 SDE register dump 但设备**不会**再进 EDL，可据此继续查是哪类提交失败。
+
 ### 8.4 振动（已可用，2026-11-18）
 
 AW8697 由内核的 `aw8697_haptic` 驱动，暴露为 LED class：`/sys/class/leds/vibrator/{state,duration,activate,gain}`。Skyward 已新增 LED 后端（`[haptics] led = "..."`），与高通 `vendor.qcom.opensource.vibrator` 的 OL 实现一致：
