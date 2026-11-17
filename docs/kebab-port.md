@@ -7,7 +7,8 @@
 
 结论：**Skyward 在 kebab 上已能完整使用**：UI、120Hz、触摸、背光、振动、`/data` 解密（含用户 CE）、
 文件管理、MTP（需先解密）、分区操作、日志与 SELinux 修复。
-**Wi-Fi 已打通固件握手与校准，但没有 `wlan0`**，是目前唯一未实现的功能；
+**Wi-Fi 搁置**：驱动、校准、`wlan0` 都已打通，只差 supplicant 的 vendor AIDL 注册；
+recovery 联网除 Skyward 自更新外没有用途，而本移植无法提供该更新，详见 §8.1。
 双系统因无 `init_boot` 而不可行（已加保护）。
 
 状态：✅ 实机验证 ｜ 🟡 代码就绪未验证 ｜ 🟠 部分可用 ｜ ❌ 未实现 / 受阻
@@ -62,7 +63,7 @@
 |---|---|---|
 | adb root shell | ✅ | File transfer 关闭时正常 |
 | MTP | ✅ | 见 1.3；USB 端口问题已修，2026-11-18 实测可用 |
-| **Wi-Fi** | 🟠 | QMI 握手 + 校准成功；无 `wlan0`。相关服务已从配置注释掉，避免 `CNSS_ASSERT` → EDL |
+| **Wi-Fi** | ⏸️ 搁置 | 驱动/校准/`wlan0` 已通；卡在 supplicant 的 AIDL 注册（§8.1）。服务与 `[wlan]` 已整体注释，UI 不再显示 WLAN 页 |
 | 在线检查更新（GitHub） | ❌ | 依赖 Wi-Fi |
 | fastbootd | 🟡 | 未测 |
 
@@ -76,7 +77,7 @@
 
 | 阻塞 | 影响 | 需要的工作 |
 |---|---|---|
-| Wi-Fi mission 模式 | Wi-Fi 与在线更新全部功能 | 离线定位触发条件，见 §8.1.1 |
+| Wi-Fi supplicant 的 AIDL 注册 | Wi-Fi 与 Skyward 自更新 | 给 recovery 一个最小的 vendor 服务目录，见 §8.1 |
 | 无 `init_boot` | 双系统 | 重新设计第二系统 first-stage 存放方式 |
 | 显示提交超时 | 以前会 panic → EDL | 已注册 DRM 恢复事件（§8.3.3）；待观察是否还有超时 |
 | AW8697 接口 | 振动 | LED-class 后端（小改动） |
@@ -409,7 +410,42 @@ fastboot boot /tmp/opencode/skyward-kebab.img
 
 ## 8. 已知问题
 
-### 8.1 Wi-Fi 不启动（主要未完成项）
+### 8.1 Wi-Fi（搁置，2026-11-18）
+
+**结论：搁置。** 除"Skyward 自更新"外，recovery 联网没有实际用途：
+
+- 系统/ROM 更新检查依赖 `[update]`，kebab 没有配置（也没必要：线刷/侧载都走 USB）
+- 安装、备份、恢复、adb、fastboot、MTP 全部走 USB 或本地存储
+- Skyward 自更新需要 GitHub，而本移植不提供发布渠道，配了也取不到东西
+
+因此 `devices/kebab.toml` 里 `[wlan]` 与 `qrtr-ns`、`cnss-daemon`、`vndservicemanager`
+三个服务**整体注释保留**；UI 的 WLAN 页与 Skyward 更新页随之不再显示。
+
+已经打通、将来恢复时不需要重做的部分：
+
+1. 固件加载、QMI 握手、冷启动校准（`qrtr-ns` + `cnss-daemon` + `/data` 已解锁）
+2. **mission 模式**：向 `/dev/wlan` 写 `"ON"` 触发 `hdd_driver_load()`；
+   若冷启动校准正在进行，它会等校准完成再探测 → `wlan0`、`p2p0`、`wifi-aware0` 出现
+3. supplicant 启动方式：`-B`（先加接口后注册 AIDL）、`-O<dir>`、
+   `-g@android:wpa_wlan0`，并按 init 方式造 `/dev/socket/wpa_wlan0` 传 fd
+4. `/dev/vndbinder` 指向 binderfs 节点，并启动 `/vendor/bin/vndservicemanager`
+
+**唯一剩余卡点**：supplicant 同时是 vendor AIDL HAL，启动时注册
+`android.hardware.wifi.supplicant.ISupplicant/default` 失败 → `wpas_aidl_init`
+返回 NULL → 进程退出 255，并把刚建好的控制 socket 一起删掉。
+日志特征：`AIDL Interface version: 5` 之后 3ms `Deiniting aidl control`。
+
+可行修法（二选一）：
+
+1. **在 Skyward 里做一个最小的 vendor 服务目录**（推荐）：作为 `/dev/vndbinder`
+   的 context manager，对 `addService` 直接回 OK。需要给 `skyward-binder` 加
+   `BINDER_SET_CONTEXT_MGR` 与服务端回复，约百行，不需要额外产物。
+2. **LD_PRELOAD 一个 shim** 让 `AServiceManager_addService` 返回 0：
+   省事，但 ramdisk 多一个 `.so`，属于掩盖。
+
+即便修好，还需实测扫描、连接、DHCP、路由与联网检测。
+
+#### 8.1.0 原先的 Wi-Fi 记录（保留）
 
 > 当前状态（2026-11-18 晚）：**mission 模式已打通，`wlan0` 已出现**
 > （还带出 `p2p0`、`wifi-aware0`），MAC 从 `wlan_mac.bin` 读到。
@@ -708,7 +744,8 @@ kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。�
 
 按优先级：
 
-1. **Wi-Fi mission 模式**（离线优先，唯一未实现的功能）：
+1. ~~Wi-Fi~~ **已搁置**（2026-11-18）：见 §8.1，只剩 supplicant 的 AIDL 注册；配置整体注释保留。
+   恢复时要做的：
    - 在 `078365e5318d`（本机内核提交）上读 `hdd_wlan_startup` / `cnss_pci_dev_powerup` 的完整调用链
    - 找出不依赖 wifi HAL 的触发方式（ioctl / sysfs / 驱动注册时序）
    - 上机时**每次启动只写一次 `fs_ready`**，且 `cnss-daemon` 以 system 用户 + 正确组启动
