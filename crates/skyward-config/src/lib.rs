@@ -204,11 +204,16 @@ pub struct Power {
     /// Whether the phone suspends once the screen is off, as its own system
     /// does.
     pub suspend: bool,
+    /// Whether the panel is rested and then turned off once it is lit no
+    /// more, as the power key does. A phone whose display driver stops the
+    /// kernel when a commit fails is left with it on instead, showing
+    /// nothing.
+    pub rest: bool,
 }
 
 impl Default for Power {
     fn default() -> Self {
-        Power { blank: true, suspend: true }
+        Power { blank: true, suspend: true, rest: true }
     }
 }
 

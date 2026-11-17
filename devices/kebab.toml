@@ -44,6 +44,7 @@ strength = { lightest = 0.4, strongest = 1.0 }
 [power]
 blank = false
 suspend = false
+rest = false
 
 # The modem partition holds the firmware the phone's drivers ask for, at
 # /vendor/firmware_mnt on the phone.
