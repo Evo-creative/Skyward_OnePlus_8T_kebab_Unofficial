@@ -80,6 +80,57 @@ impl Message {
         self.framed(at, value.len(), value.len() + 1);
     }
 
+    /// A structure handed over as one run of bytes, with the runs its own
+    /// fields point at: each field at `offset` is written as the address of
+    /// its run, which the driver replaces with where it copies the run to.
+    /// The answer is which address the structure's own is.
+    pub fn structure(&mut self, mut bytes: Vec<u8>, pointed: Vec<(usize, Vec<u8>)>) -> usize {
+        let mut inside = Vec::new();
+        for (offset, data) in pointed {
+            let length = data.len();
+            let at = self.keep(data);
+            bytes[offset..offset + 8].copy_from_slice(&at.to_le_bytes());
+            inside.push((at, length));
+        }
+        let length = bytes.len();
+        let at = self.keep(bytes);
+        let parent = self.address(at, length, None);
+        for (data_at, length) in inside {
+            self.address(data_at, length, Some(parent));
+        }
+        parent
+    }
+
+    /// A run of `count` structures of `size` bytes each, handed over the way
+    /// a run of bytes is, with the runs their own fields point at: each
+    /// given by the structure it is in and where in it.
+    pub fn structures(&mut self, mut data: Vec<u8>, size: usize, pointed: Vec<(usize, usize, Vec<u8>)>) -> usize {
+        let mut inside = Vec::new();
+        for (index, offset, bytes) in pointed {
+            let length = bytes.len();
+            let at = self.keep(bytes);
+            let field = index * size + offset;
+            data[field..field + 8].copy_from_slice(&at.to_le_bytes());
+            inside.push((at, length));
+        }
+        let count = if size == 0 { 0 } else { data.len() / size };
+        let length = data.len();
+        let at = self.keep(data);
+        // The frame the run is carried in: where the structures are, how
+        // many there are, and that whoever reads them does not free them.
+        let mut frame = Vec::with_capacity(FRAME_BYTES);
+        frame.extend_from_slice(&at.to_le_bytes());
+        frame.extend_from_slice(&(count as u32).to_le_bytes());
+        frame.extend_from_slice(&[0; 4]);
+        let frame_at = self.keep(frame);
+        let parent = self.address(frame_at, FRAME_BYTES, None);
+        let run = self.address(at, length, Some(parent));
+        for (data_at, length) in inside {
+            self.address(data_at, length, Some(run));
+        }
+        parent
+    }
+
     /// Hold on to bytes the driver will read, and say where they are.
     fn keep(&mut self, bytes: Vec<u8>) -> u64 {
         let bytes = bytes.into_boxed_slice();

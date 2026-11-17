@@ -181,10 +181,13 @@ enum Cmd {
         #[arg(long)]
         alias: Option<String>,
     },
-    /// Report the phone's key service of the older hardware layout and what
-    /// it says it can do.
+    /// Report the phone's key service of the older hardware layout and, given
+    /// a key directory Android wrote, unwrap the key it holds.
     #[cfg(target_os = "android")]
-    Keymaster,
+    Keymaster {
+        #[arg(long)]
+        key: Option<PathBuf>,
+    },
     /// Say what the phone's credential service answers, which takes no
     /// credential and changes nothing.
     #[cfg(target_os = "android")]
@@ -375,16 +378,18 @@ fn main() -> Result<()> {
             Ok(())
         }
         #[cfg(target_os = "android")]
-        Cmd::Keymaster => {
+        Cmd::Keymaster { key } => {
             let hardware = skyward_binder::driver::Binder::hardware()?;
             let service = skyward_crypto::keymaster::Keymaster::open(&hardware)?;
             let hw = service.hardware()?;
             println!("{}", service.interface());
-            println!(
-                "secure {} ec {} symmetric {} attestation {} all users {}",
-                hw.secure, hw.ec, hw.symmetric, hw.attestation, hw.all_users
-            );
-            println!("client {} storage {} attestation {}", hw.client_id, hw.storage_key, hw.attestation_key);
+            println!("security level {} (0 software, 1 secure world, 2 its own chip)", hw.security_level);
+            println!("{} by {}", hw.name, hw.author);
+            if let Some(key) = key {
+                let stored = skyward_crypto::keystore::StoredKey::load(&key)?;
+                let raw = stored.unwrap(skyward_crypto::keystore::Unwrap::Hardware(&service))?;
+                println!("{} holds a key of {} bytes", key.display(), raw.len());
+            }
             Ok(())
         }
         #[cfg(target_os = "android")]
@@ -421,11 +426,9 @@ fn main() -> Result<()> {
             Ok(())
         }
         #[cfg(target_os = "android")]
-        Cmd::Data { credential, close: false } => {
+        Cmd::Data { credential, close: false } => skyward_crypto::with_key_service(|service| {
             use skyward_crypto::data;
-            let binder = skyward_binder::driver::Binder::open()?;
-            let service = skyward_crypto::keymint::KeyMint::open(&binder)?;
-            let opening = data::open_without_credential(&service)?;
+            let opening = data::open_without_credential(service)?;
             match &opening.mounted {
                 Some(mounted) => {
                     if let Some(checked) = &mounted.checked {
@@ -439,7 +442,7 @@ fn main() -> Result<()> {
             let mut closed = opening.closed;
             let asked = closed.iter().find(|c| !c.made_up).map(|c| c.user);
             if let (Some(credential), Some(user)) = (&credential, asked) {
-                closed = data::unlock(&service, &closed, user, credential.as_bytes())?;
+                closed = data::unlock(service, &closed, user, credential.as_bytes())?;
             }
             for c in &closed {
                 match &c.why {
@@ -451,7 +454,7 @@ fn main() -> Result<()> {
                 println!("every user's own files can be read");
             }
             Ok(())
-        }
+        }),
         #[cfg(target_os = "android")]
         Cmd::Ui { config, font, mono, unlock, dump } => {
             let cfg = DeviceConfig::load(&config)?;
