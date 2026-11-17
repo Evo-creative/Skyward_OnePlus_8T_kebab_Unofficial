@@ -5,22 +5,80 @@
 
 ## 1. 现状摘要
 
-| 能力 | 状态 | 说明 |
+结论：**Skyward 能在 kebab 上刷入启动并正常运行 UI、触摸、高刷、分区操作**；
+**Wi-Fi 已打通固件握手与校准，但没有 `wlan0`**；**`/data` 解密不可用**（缺 KeyMint AIDL）；
+双系统因无 `init_boot` 而不可行。
+
+状态：✅ 实机验证 ｜ 🟡 代码就绪未验证 ｜ 🟠 部分可用 ｜ ❌ 未实现 / 受阻
+
+### 1.1 启动与系统
+
+| 期望功能 | 状态 | 说明 |
 |---|---|---|
-| 启动（recovery 分区镜像） | ✅ | `fastboot boot` 与打包流程均已验证 |
-| UI | ✅ | 正常显示，英文界面 |
-| 120Hz 高刷 | ✅ | DRM 暴露 60/120 两个模式，UI 启动后切到 120 |
+| 刷入 recovery 分区后启动 | ✅ | 修 `recovery_dtbo_offset` 后成功（`682cc60`） |
+| `fastboot boot` 临时启动 | ✅ | 全程可用 |
+| 启动到 UI | ✅ | `the pages speak En` |
+| A/B 槽位识别 | ✅ | `slot_suffix=_a`，super 映射正常 |
+| 槽位切换（boot control HAL） | 🟡 | 代码在，未实机操作 |
+| 双系统 | ❌ | 无 `init_boot`；已加库级保护（`d873027`） |
+| Recovery 自更新（在线） | ❌ | 依赖 Wi-Fi |
+| 「Flash Skyward again」 | 🟡 | 未验证（会写 recovery） |
+
+### 1.2 界面与输入
+
+| 期望功能 | 状态 | 说明 |
+|---|---|---|
+| UI 渲染（DRM/KMS） | ✅ | 1080×2400，面板 `connected` |
+| **120Hz 高刷** | ✅ | DRM 有 60/120 两个模式，UI 切到最快 |
 | 触摸 | ✅ | Synaptics S3908，evdev `input2` |
-| 分区识别 / super 挂载 | ✅ | odm/product/system/system_ext/vendor 全部挂上 |
+| 背光 / 亮度 | ✅ | `panel0-backlight`，normal-max 修复（`af3ceb5`） |
+| 振动 | ❌ | AW8697 走 `/sys/class/leds/vibrator`，Skyward 用 evdev FF |
+| 语言切换（简/繁/英） | 🟡 | 字体子集已覆盖 UI 全部字符，实机未切换 |
+| 字体显示 | ✅ | MiSans 子集，ramdisk 39.3 → 27.2 MiB（`00b9f39`） |
+| 搜索 / 主题 / 时区 | 🟡 | 代码就绪，未逐项验证 |
+| About Phone | ✅ | 实机确认信息正确 |
+| 终端 | ✅ | adb shell 正常 |
+| 截图 `Capture` | 🟡 | 未验证 |
+
+### 1.3 存储与刷写
+
+| 期望功能 | 状态 | 说明 |
+|---|---|---|
+| super / 逻辑分区映射挂载 | ✅ | 5 个逻辑分区全部挂上 |
 | persist / modem 挂载 | ✅ | `/mnt/vendor/persist`、`/vendor/firmware_mnt` |
-| 背光 | ✅ | `panel0-backlight`，max 2047 |
-| adb（root shell） | ✅ | 需 File transfer 关闭，见 §8.2 |
-| 字体 | ✅ | 子集化 MiSans，ramdisk 39.3 → 27.2 MiB，见 §3.6 |
-| MTP | ⚠️ | 修复代码已提交，未复测 |
-| Wi-Fi | ❌ | 固件加载成功，芯片不进入 FW ready，见 §8.1 |
-| Data 解密 | ❌ | 本机只有 Keymaster 4.x HIDL，见 §8.3 |
-| 振动 | ❌ | AW8697 是 LED 接口，非 evdev FF，见 §8.4 |
-| 双系统 | ⛔ | 本机无 `init_boot` 分区，现有实现不可用 |
+| 分区浏览 | 🟡 | `skyward mount/lp` 可用，未细测 |
+| 备份 / 恢复 | 🟡 | `[backup]` 已配置（modemst1/2、fsg、fsc、persist），未跑 |
+| 刷镜像 / zip / payload OTA | 🟡 | 代码通用，未在 Skyward 内验证 |
+| AVB 处理（avbctl） | 🟡 | 符号链接已注入，未测 |
+| 擦除 / 格式化 / 工厂重置 | 🟡 | 未测 |
+| **`/data` 解密（FBE+metadata）** | ❌ | 本机只有 Keymaster 4.x HIDL，Skyward 需 KeyMint AIDL |
+| 文件管理器（内部存储） | ❌ | 被解密阻塞 |
+| MTP（内部存储） | 🟠 | 修复已提交（`e017082`），未复测，且依赖解密 |
+
+### 1.4 连接与网络
+
+| 期望功能 | 状态 | 说明 |
+|---|---|---|
+| adb root shell | ✅ | File transfer 关闭时正常 |
+| MTP | 🟠 | 见 1.3；USB 端口问题已修 |
+| **Wi-Fi** | 🟠 | QMI 握手 + 校准成功；无 `wlan0` |
+| 在线检查更新（GitHub） | ❌ | 依赖 Wi-Fi |
+| fastbootd | 🟡 | 未测 |
+
+### 1.5 量化
+
+- **完全可用**：启动、UI、120Hz、触摸、背光、分区挂载、adb、About、字体（9 项）
+- **代码就绪待验证**：约 12 项（槽位切换、备份恢复、刷写、语言切换、MTP…）
+- **未实现 / 受阻**：6 项（Wi-Fi 完整、解密、内部存储文件管理、MTP 内部存储、在线更新、双系统）
+
+### 1.6 阻塞项
+
+| 阻塞 | 影响 | 需要的工作 |
+|---|---|---|
+| Wi-Fi mission 模式 | Wi-Fi 与在线更新全部功能 | 离线定位触发条件，见 §8.1.1 |
+| Keymaster 4.x HIDL | 解密、文件管理、MTP | 给 `skyward-crypto` 加 Keymaster HIDL 客户端 |
+| 无 `init_boot` | 双系统 | 重新设计第二系统 first-stage 存放方式 |
+| AW8697 接口 | 振动 | LED-class 后端（小改动） |
 
 ## 2. Skyward 的工作方式（与本机相关部分）
 
@@ -161,6 +219,13 @@ KirkMono-Regular.ttf   264 KB / 142 KB
 | `3304ddb` | `skyward-block::boot_param` 与 `system-init` 以字节读 `/proc/cmdline`：OnePlus bootloader 在 `avbkeysha256` 后追加非 UTF-8 字节 |
 | `af3ceb5` | 背光 normal-max 支持高通通用 DT 字段，找不到时回退到面板最大值 |
 | `e017082` | MTP：`mtp,adb` 触发不再依赖 `sys.usb.config_disable`；`usb::switch` 失败时回退到原配置 |
+| `37def68` | 本文档初版：实机数据、构建流程、排查记录 |
+| `00b9f39` | 字体子集化：`MiSans-Subset.ttf`，字形 29,773 → 10,018，ramdisk 39.3 → 27.2 MiB |
+| `4fdd2de` | v0–v2 header 重算 `hash_digest`（mkbootimg 的 SHA-1 摘要）；打包器支持 `--size` |
+| `e403062` | 文档：恢复镜像只能取自 LineageOS 包；说明 vbmeta/boot 版本不匹配的表象 |
+| `682cc60` | **关键**：v0–v2 header 的 `recovery_dtbo_offset` 按实际布局重算（修好刷入启动） |
+| `d873027` | 无 `init_boot` 的手机不写 `boot`/`init_boot`（库级保护） |
+| `a3eece6`/`4a32ba5` | 文档：AVB 未签名 footer 与验证模式；Wi-Fi 需要的用户态组件与卡点 |
 
 ### 4.1 为什么需要 boot header v2
 
@@ -328,6 +393,10 @@ fastboot boot /tmp/opencode/skyward-kebab.img
 ## 8. 已知问题
 
 ### 8.1 Wi-Fi 不启动（主要未完成项）
+
+> 当前状态（2026-11-17 收尾）：固件加载、QMI 握手、冷启动校准均已通过，
+> 但**没有进入 mission 模式**，因此没有 `wlan0`。详见 §8.1.1。
+> 下方「现象」是最初的记录，保留作为对照。
 
 #### 8.1.1 进展（2026-11-17 晚，实机验证）
 
@@ -507,21 +576,30 @@ kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。�
 
 ## 9. 下一步
 
-优先级从高到低：
+> 2026-11-17 收尾状态：**Wi-Fi 暂停**。实机反复触发 `fs_ready` 会走 cnss2 的失败路径
+> （`CNSS_ASSERT`），导致设备进入 `05c6:900e`（crashdump/EDL）。后续应先离线分析，再上机。
 
-1. **刷入前先确认 `Verity mode` 与 vbmeta 状态**（见 §8.6）；未签名镜像只在禁用校验时可启动
-2. **日常测试只用 `fastboot boot`**，不再刷 recovery，直到 §8.6 的问题解决
-3. 若仍不通：给 cnss2 打开调试能力（需要可用的 debugfs 挂载点），或在 ramdisk 里预留 `/sys/kernel/debug`；同时对比 wifi HAL 打开 `/dev/wlan` 后驱动行为
-4. 复测 MTP（重新打开 File transfer）
-5. 增加 Keymaster 4.x HIDL 客户端（解密）
-6. 增加 LED 振动后端（可选）
-7. ~~字体子集化~~ 已完成：`resources/fonts/MiSans-Subset.ttf`（ramdisk 39.3 → 27.2 MiB）
+按优先级：
 
-安全事项：
+1. **复测 MTP**：重新打开 File transfer，确认 `e017082` 生效
+2. **Keymaster 4.x HIDL 客户端**（解密）：解锁文件管理、MTP 内部存储、备份
+3. **Wi-Fi mission 模式**（离线优先）：
+   - 在 `078365e5318d`（本机内核提交）上读 `hdd_wlan_startup` / `cnss_pci_dev_powerup` 的完整调用链
+   - 找出不依赖 wifi HAL 的触发方式（ioctl / sysfs / 驱动注册时序）
+   - 上机时**每次启动只写一次 `fs_ready`**，且 `cnss-daemon` 以 system 用户 + 正确组启动
+4. 验证备份/恢复、刷写、fastbootd、槽位切换
+5. LED 振动后端（可选）
+6. ~~字体子集化~~ 已完成
 
-- 首次刷写前务必备份 `recovery_a`
-- 不要锁定 bootloader
+## 9.1 安全事项（务必遵守）
+
+- 首次刷写前备份 `recovery_a`；恢复需要**同一构建**的 `vbmeta.img`、`boot.img`、`dtbo.img`
+- 只在 verity 关闭（`vbmeta_a` flags=3）时刷未签名镜像
+- 出现 `The current image (boot/recovery) have been destroyed`：刷回同构建的
+  `vbmeta` + `boot` + `dtbo`（实测有效）
+- 设备进入 `05c6:900e`（EDL/crashdump）：长按电源 15–20 秒；不行再用 MSM Download Tool
 - 测试期间不要使用 Install / Wipe / Flash Skyward again
+- 不要锁定 bootloader
 
 ## 10. 附录
 
