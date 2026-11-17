@@ -716,40 +716,6 @@ fn parts_wipe(app: &mut App, steps: Vec<Step>, logs: &[String], asked: bool, ref
 /// install the system asked for before such a start.
 const PANICS: [&str; 2] = ["kernel_panic", "Panic"];
 
-/// Where the display driver keeps what it does with a commit that fails:
-/// each card keeps a folder of its own under the kernel's debug files.
-const DRM_DEBUG: &str = "/sys/kernel/debug/dri";
-
-/// Have the display driver dump what it knows of a commit that fails rather
-/// than stop the kernel. A phone's own system has a program listening for
-/// the failure and can carry on; a recovery has none, and the driver stops
-/// the kernel on the first one, which the bootloader answers with its
-/// emergency download mode. Gives the cards told, if any were there.
-pub fn let_display_errors_go() -> Result<usize> {
-    // The kernel's debug files, which a recovery's init does not mount.
-    let target = c"/sys/kernel/debug";
-    let mounted = unsafe {
-        libc::mount(c"debugfs".as_ptr(), target.as_ptr(), c"debugfs".as_ptr(), 0, std::ptr::null())
-    };
-    if mounted != 0 {
-        let e = std::io::Error::last_os_error();
-        if !matches!(e.raw_os_error(), Some(libc::EBUSY)) {
-            return Err(e).context("mount the kernel's debug files");
-        }
-    }
-    let mut told = 0;
-    let dir = Path::new(DRM_DEBUG);
-    for entry in fs::read_dir(dir).with_context(|| format!("read {}", dir.display()))? {
-        let panic = entry.with_context(|| format!("read {}", dir.display()))?.path().join("debug/panic");
-        if !panic.is_file() {
-            continue;
-        }
-        fs::write(&panic, "0").with_context(|| format!("write 0 to {}", panic.display()))?;
-        told += 1;
-    }
-    Ok(told)
-}
-
 /// Whether the phone came to the recovery after its kernel stopped.
 pub fn panicked() -> bool {
     skyward_sys::prop("ro.boot.bootreason").is_some_and(|reason| PANICS.iter().any(|p| p.eq_ignore_ascii_case(&reason)))
@@ -1284,13 +1250,12 @@ impl<'a> Pages<'a> {
         let info = skyward_info::collect_with(cfg, battery.unwrap_or_default())?;
         let fonts = Fonts::load(font, 0, mono)?;
         let mut surface = KmsSurface::open("/dev/dri/card0")?;
-        // The card is up, so the files the display driver keeps of what it
-        // does with a failed commit are there: told to dump them rather
-        // than stop the kernel before the first commit goes to the panel.
-        match let_display_errors_go() {
-            Ok(0) => {}
-            Ok(told) => skyward_sys::kmsg(&format!("{told} display cards will dump a failed commit rather than stop the kernel"))?,
-            Err(e) => skyward_sys::kmsg(&format!("the display cards were not told to keep the kernel: {e:#}"))?,
+        // The card is up: asked before the first commit goes to the panel to
+        // tell of a commit that fails rather than stop the kernel on it, as
+        // the phone's own system asks.
+        match surface.watch_for_errors() {
+            Ok(()) => skyward_sys::kmsg("the display driver will tell of a failed commit rather than stop the kernel")?,
+            Err(e) => skyward_sys::kmsg(&format!("the display driver was not asked to keep the kernel: {e:#}"))?,
         }
         let (w, h) = surface.size();
         // A touch controller that follows the panel wakes as the panel goes

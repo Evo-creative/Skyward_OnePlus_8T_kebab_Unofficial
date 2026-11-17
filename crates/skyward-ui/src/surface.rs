@@ -753,6 +753,39 @@ pub mod kms {
             Ok(s)
         }
 
+        /// Ask the display driver to tell this program of a commit that
+        /// fails rather than stop the kernel on it, as the phone's own
+        /// system asks through a program of its own. With no program
+        /// asking, the driver stops the kernel on the first failed commit,
+        /// and the bootloader answers a kernel that stopped with its
+        /// emergency download mode.
+        pub fn watch_for_errors(&self) -> Result<()> {
+            // struct drm_msm_event_req, as msm_drm.h lays it out.
+            #[repr(C)]
+            struct EventReq {
+                object_id: u32,
+                object_type: u32,
+                event: u32,
+                client_context: u64,
+                index: u32,
+            }
+            const CONNECTOR: u32 = 0xc0c0_c0c0;
+            const RECOVERY: u32 = 0x8000_0007;
+            const REGISTER: u32 =
+                (1 << 30) | ((std::mem::size_of::<EventReq>() as u32) << 16) | ((b'd' as u32) << 8) | 0x81;
+            let req = EventReq {
+                object_id: self.conn.into(),
+                object_type: CONNECTOR,
+                event: RECOVERY,
+                client_context: 0,
+                index: 0,
+            };
+            if unsafe { libc::ioctl(self.card.as_fd().as_raw_fd(), REGISTER as _, &req) } < 0 {
+                return Err(std::io::Error::last_os_error()).context("ask the display driver to tell of a failed commit");
+            }
+            Ok(())
+        }
+
         pub fn describe(&self) -> &str {
             &self.summary
         }

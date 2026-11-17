@@ -545,15 +545,24 @@ sde_encoder_phys_cmd_handle_ppdone_timeout / poll_timeout_wr_ptr 超时
 
 `sde_dbg` 的 `panic_on_err` 默认就是 1（`DEFAULT_PANIC`），而 Android 里 SurfaceFlinger 会监听恢复事件、驱动只 capture 不 panic；recovery 里没人监听，所以**任何一次提交超时都直接把内核干掉**。
 
-处置（已在 `445037e` 加入）：
+处置：
 
-1. 打开 DRM 后、第一次提交前，把每张卡的 `/sys/kernel/debug/dri/<n>/debug/panic` 写成 0：失败只 dump、不 panic
-   （`ui.rs::let_display_errors_go`，挂 debugfs 后逐个写）
+1. **注册恢复事件**（`surface.rs::watch_for_errors`）：用 DRM 的 `MSM_REGISTER_EVENT` ioctl
+   （`DRM_IOW(0x40+0x41, struct drm_msm_event_req)`，`object_type = DRM_MODE_OBJECT_CONNECTOR`，
+   `event = DRM_EVENT_SDE_HW_RECOVERY = 0x80000007`）替 SurfaceFlinger 注册那个事件。
+   之后超时走 `sde_connector_event_notify` + ctl reset，而不是 `SDE_DBG_DUMP(..., "panic")`。
+   启动日志会打印：`the display driver will tell of a failed commit rather than stop the kernel`
 2. `[power] rest = false`：面板永不休眠/关断，只把背光降到 0、显示黑帧，减少会失败的提交种类
 
-诊断支持：每次启动把 pstore（ramoops）里的上次崩溃记录复制到 `/metadata/skyward/crash/`，见 `crash.rs`。
+注意：`CONFIG_DEBUG_FS` 在**实际运行的内核里没有**（`mount -t debugfs` 报 `No such device`），
+所以不能用 `/sys/kernel/debug/dri/*/debug/panic` 那条路；上面的 ioctl 是唯一可行的用户态办法。
 
-仍需观察：若面板仍偶发超时，日志里会出现 SDE register dump 但设备**不会**再进 EDL，可据此继续查是哪类提交失败。
+诊断支持：`crash.rs` 每次启动会把 pstore 里的上次记录复制到 `/metadata/skyward/crash/`。
+但实测 **从 EDL 恢复后 pstore 是空的**（bootloader 进 EDL 前把 ramoops 区域清掉了），
+所以真正进 EDL 的那次仍然只能靠崩溃前的实时日志；pstore 只对普通重启/非 EDL 崩溃有效。
+
+仍需观察：若面板偶发超时，日志里会出现 SDE register dump 但设备**不会**再进 EDL，
+可据此继续查是哪类提交失败。
 
 ### 8.4 振动（已可用，2026-11-18）
 
