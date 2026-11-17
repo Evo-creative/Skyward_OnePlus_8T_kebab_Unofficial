@@ -617,17 +617,23 @@ kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。�
 > 2026-11-17 收尾状态：**Wi-Fi 暂停**。实机反复触发 `fs_ready` 会走 cnss2 的失败路径
 > （`CNSS_ASSERT`），导致设备进入 `05c6:900e`（crashdump/EDL）。后续应先离线分析，再上机。
 
+> 2026-11-18 状态：**Data 解密已通**（含用户 CE），振动已通（LED 后端 + 全交互反馈）。
+> 只剩 Wi-Fi，以及几项需要上机确认的功能。
+
 按优先级：
 
-1. **复测 MTP**：重新打开 File transfer，确认 `e017082` 生效
-2. **Keymaster 4.x HIDL 客户端**（解密）：解锁文件管理、MTP 内部存储、备份
-3. **Wi-Fi mission 模式**（离线优先）：
+1. **Wi-Fi mission 模式**（离线优先，唯一未实现的功能）：
    - 在 `078365e5318d`（本机内核提交）上读 `hdd_wlan_startup` / `cnss_pci_dev_powerup` 的完整调用链
    - 找出不依赖 wifi HAL 的触发方式（ioctl / sysfs / 驱动注册时序）
    - 上机时**每次启动只写一次 `fs_ready`**，且 `cnss-daemon` 以 system 用户 + 正确组启动
-4. 验证备份/恢复、刷写、fastbootd、槽位切换
-5. LED 振动后端（可选）
+   - 相关服务目前已在 `devices/kebab.toml` 注释掉，避免 `CNSS_ASSERT` → EDL
+2. **复测 MTP**：重新打开 File transfer，确认 `e017082` 生效（上次只验证了关闭后 adb 恢复）
+3. **验证备份/恢复**、刷写、fastbootd、槽位切换（代码路径都通，缺 kebab 实机确认）
+4. ~~Keymaster 4.x HIDL 客户端~~ 已完成（`bfe5a64` 起，见 8.3）
+5. ~~LED 振动后端~~ 已完成（见 8.4）
 6. ~~字体子集化~~ 已完成
+
+不在计划内：双系统（kebab 没有 `init_boot`，需重新设计，见 8.5）
 
 ## 9.1 安全事项（务必遵守）
 
