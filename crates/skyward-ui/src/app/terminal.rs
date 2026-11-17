@@ -163,7 +163,7 @@ mod tests {
         let rest = pixel(&mut app, 0);
         app.touch(Touch::Down(x, y), &f, 100);
         assert_ne!(pixel(&mut app, 100), rest, "held down, its disc darkens");
-        assert_eq!(app.touch(Touch::Up, &f, 150), vec![Effect::StartShell("/data/adb".into())]);
+        assert_eq!(app.touch(Touch::Up, &f, 150), vec![Effect::Haptic, Effect::StartShell("/data/adb".into())]);
         for now in (150..1000).step_by(8) {
             pixel(&mut app, now);
         }
@@ -176,7 +176,7 @@ mod tests {
         }
         app.touch(Touch::Down(x, y), &f, 1500);
         pixel(&mut app, 1500);
-        assert_eq!(app.touch(Touch::Up, &f, 1550), vec![Effect::SaveText { path: "/data/adb/a.txt".into(), text: "ba".into() }]);
+        assert_eq!(app.touch(Touch::Up, &f, 1550), vec![Effect::Haptic, Effect::SaveText { path: "/data/adb/a.txt".into(), text: "ba".into() }]);
     }
 
     #[test]

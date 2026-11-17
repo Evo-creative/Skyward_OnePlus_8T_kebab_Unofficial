@@ -10,8 +10,8 @@ impl App {
     pub(super) fn work(&mut self, spot: Spot, now: u64) -> Vec<Effect> {
         let l = self.state.lang;
         match spot.stop {
-            Stop::Back => self.act(Action::Back, now),
-            Stop::Button(action) => self.act(action, now),
+            Stop::Back => self.tap(Action::Back, now),
+            Stop::Button(action) => self.tap(action, now),
             Stop::Hit(Action::Slider(which)) => {
                 self.adjusting = !self.adjusting;
                 if self.adjusting {
@@ -25,7 +25,7 @@ impl App {
                 }
                 Vec::new()
             }
-            Stop::Hit(action) => self.act(action, now),
+            Stop::Hit(action) => self.tap(action, now),
             Stop::Dot(i) if self.state.pattern.last() == Some(&i) => self.drawn(now),
             Stop::Dot(i) => {
                 if self.state.pattern.is_empty() {
@@ -556,7 +556,7 @@ mod tests {
         }
         assert_eq!(app.state.code, "2580");
         light_on(&mut app, &f, &i, Stop::Hit(Action::Type(Cap::Enter)));
-        assert_eq!(press(&mut app, Key::Power, 0), vec![Effect::Unlock { user: 0, code: "2580".into() }]);
+        assert_eq!(press(&mut app, Key::Power, 0), vec![Effect::Haptic, Effect::Unlock { user: 0, code: "2580".into() }], "the motor taps as the code goes");
     }
 
     #[test]
@@ -579,7 +579,7 @@ mod tests {
         assert!(app.key_up(Key::Power, 1000 + LONG_PRESS_MS + 100).is_empty(), "and the key comes up to nothing");
         app.key(Key::Back, 2000);
         assert_eq!(lit(&mut app, &f, &i), Some(Stop::Hit(Action::OpenEntry(0))));
-        assert_eq!(press(&mut app, Key::Power, 3000), vec![Effect::ReadDir("/vendor".into())], "a short press goes into the folder");
+        assert_eq!(press(&mut app, Key::Power, 3000), vec![Effect::Haptic, Effect::ReadDir("/vendor".into())], "a short press goes into the folder, with a tap of the motor");
     }
 
     #[test]

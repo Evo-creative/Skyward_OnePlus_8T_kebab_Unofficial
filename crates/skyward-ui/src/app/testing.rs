@@ -73,6 +73,10 @@ pub(super) fn tap_at(app: &mut App, f: &Fonts, i: &DeviceInfo, action: Action, n
     let (x, y) = spot(app, f, i, action);
     let mut fx = app.touch(Touch::Down(x, y), f, now);
     fx.extend(app.touch(Touch::Up, f, now));
+    // What a page does is what a test of it is about; the tap of the motor
+    // every tap gives is the same whatever the page, and
+    // `a_tap_of_the_motor_comes_with_every_tap` checks it.
+    fx.retain(|e| !matches!(e, Effect::Haptic));
     fx
 }
 
@@ -90,6 +94,7 @@ pub(super) fn tap_button(app: &mut App, f: &Fonts, i: &DeviceInfo, now: u64) -> 
     let (x, y) = widgets::button_rect(&app.theme()).centre();
     let mut fx = app.touch(Touch::Down(x, y), f, now);
     fx.extend(app.touch(Touch::Up, f, now));
+    fx.retain(|e| !matches!(e, Effect::Haptic));
     fx
 }
 

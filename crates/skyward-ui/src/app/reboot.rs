@@ -114,12 +114,12 @@ mod tests {
         assert!(press(&mut app, Key::VolumeDown, 0).is_empty());
         assert_eq!(lit(&mut app, &f, &i), choice(1), "down moves to the next choice");
         assert!(app.key(Key::Power, 0).is_empty(), "power takes it as it comes up");
-        assert_eq!(app.key_up(Key::Power, 0), vec![Effect::EnterRecovery]);
+        assert_eq!(app.key_up(Key::Power, 0), vec![Effect::Haptic, Effect::EnterRecovery]);
         assert!(app.display_on(), "power leaves the panel on here");
         press(&mut app, Key::VolumeUp, 0);
         press(&mut app, Key::VolumeUp, 0);
         assert_eq!(lit(&mut app, &f, &i), choice(FASTBOOT_CHOICES.len() - 1), "up from the first goes round to the last");
-        assert_eq!(press(&mut app, Key::Power, 0), vec![Effect::Reboot(Target::PowerOff)]);
+        assert_eq!(press(&mut app, Key::Power, 0), vec![Effect::Haptic, Effect::Reboot(Target::PowerOff)]);
         assert_eq!(tap(&mut app, &f, &i, Action::RebootTo(Target::Bootloader)), vec![Effect::Reboot(Target::Bootloader)], "a touch takes a choice too");
         assert!(press(&mut app, Key::Back, 0).is_empty());
         assert_eq!(app.screen(), Screen::Fastboot, "there is nothing to go back to");

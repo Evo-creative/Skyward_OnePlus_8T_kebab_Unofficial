@@ -207,7 +207,7 @@ impl App {
                     if let Some(p) = &mut self.row_press {
                         p.lift(now);
                     }
-                    fx.extend(self.act(a, now));
+                    fx.extend(self.tap(a, now));
                 }
                 Drag::Press { x, y, action: None, .. } if self.screen() == Screen::Editor => self.place_caret(f, x, y + scroll),
                 Drag::History { pitch, .. } => {
@@ -367,6 +367,19 @@ impl App {
             return fx;
         }
         fx.extend(self.key_down(key, now, now));
+        fx
+    }
+
+    /// Work the control `action` names as a tap works it, with a tap of the
+    /// motor first for what does something at once, as a switch does and a
+    /// row that opens a page does. Sliders and the tracks that are dragged
+    /// tick as they are worked instead of when they are let go.
+    pub(super) fn tap(&mut self, action: Action, now: u64) -> Vec<Effect> {
+        let mut fx = Vec::new();
+        if self.state.vibrate && !matches!(action, Action::Slider(_) | Action::Confirm(_) | Action::Pattern) {
+            fx.push(Effect::Haptic);
+        }
+        fx.extend(self.act(action, now));
         fx
     }
 

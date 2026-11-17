@@ -758,7 +758,7 @@ mod tests {
         app.tick(5000);
         let row = app.lit().expect("lit");
         assert!(app.shows(&row, app.top().1), "scrolled into view");
-        assert_eq!(press(&mut app, Key::Power, 5000), vec![Effect::ReadDir("/dir040".into())]);
+        assert_eq!(press(&mut app, Key::Power, 5000), vec![Effect::Haptic, Effect::ReadDir("/dir040".into())]);
         app.set_files("/dir040".into(), Ok(vec![entry("a", FileKind::File)]), LISTED);
         assert_eq!(lit(&mut app, &f, &i), Some(Stop::Hit(Action::OpenEntry(0))), "a folder opened lights its first entry");
         assert_eq!(app.key(Key::Back, 6000), vec![Effect::ReadDir("/".into())]);
