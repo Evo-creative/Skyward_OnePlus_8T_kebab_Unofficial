@@ -1939,13 +1939,34 @@ pub fn keypad(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, top: f32, pressed: 
 }
 
 /// The code typed so far, as a dot for each character. Nothing is drawn
-/// for a code not started.
+/// for a code not started. A code too long for one row keeps its newest
+/// dots in view, an ellipsis standing for the ones that went before.
 pub fn code_dots(c: &mut Canvas, t: &Theme, cx: f32, cy: f32, typed: usize) {
     let m = &t.m;
-    let pitch = m.dp(26.0);
-    let left = cx - (typed.saturating_sub(1) as f32) * pitch / 2.0;
-    for i in 0..typed {
-        c.fill_circle(left + i as f32 * pitch, cy, m.dp(7.0), t.pal.accent);
+    let r = m.dp(7.0);
+    let widest = m.dp(26.0);
+    let closest = m.dp(17.0);
+    // The room the row may take, and the dots that fit in it at the
+    // closest pitch they are still told apart at.
+    let room = (m.w as f32 - 2.0 * m.margin - 2.0 * r).max(widest);
+    let most = ((room / closest).floor() as usize).saturating_add(1).max(1);
+    if typed <= most {
+        let pitch = if typed > 1 { (room / (typed - 1) as f32).min(widest) } else { widest };
+        let left = cx - (typed.saturating_sub(1) as f32) * pitch / 2.0;
+        for i in 0..typed {
+            c.fill_circle(left + i as f32 * pitch, cy, r, t.pal.accent);
+        }
+    } else if most < 2 {
+        c.fill_circle(cx, cy, r, t.pal.accent);
+    } else {
+        let pitch = (room / (most - 1) as f32).min(widest);
+        let left = cx - (most - 1) as f32 * pitch / 2.0;
+        for k in 0..3 {
+            c.fill_circle(left + (k as f32 - 1.0) * m.dp(4.5), cy, m.dp(2.0), t.pal.accent);
+        }
+        for i in 1..most {
+            c.fill_circle(left + i as f32 * pitch, cy, r, t.pal.accent);
+        }
     }
 }
 

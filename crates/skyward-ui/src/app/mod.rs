@@ -1327,7 +1327,8 @@ impl App {
         let darkens = self.row_press.map(|p| p.rise).filter(|&rise| rise > now);
         let easing = self.bright.moving(now).then_some(now + BACKLIGHT_STEP_MS);
         let held = match self.drag {
-            Drag::Press { action: Some(Action::OpenEntry(_)), at, .. } => Some(at + LONG_PRESS_MS),
+            Drag::Press { action: Some(Action::OpenEntry(_)), at, .. }
+            | Drag::Press { action: Some(Action::Type(Cap::Backspace)), at, .. } => Some(at + LONG_PRESS_MS),
             _ => None,
         };
         let repeat = match self.button {
@@ -1383,6 +1384,16 @@ impl App {
         {
             self.button = Some((key, Press::Spent));
             fx.extend(self.held_entry(i));
+        }
+        // The erase key held long enough clears the field it erases from,
+        // rather than taking one character a press.
+        if let Drag::Press { action: Some(Action::Type(Cap::Backspace)), at, .. } = self.drag
+            && now >= at + LONG_PRESS_MS
+        {
+            self.drag = Drag::Held;
+            if self.clear_typing() && self.state.vibrate {
+                fx.push(Effect::Haptic);
+            }
         }
         let active = *self.active.get_or_insert(now);
         if let (true, Some(after)) = (self.display_on, SCREEN_OFF[self.state.screen_off]) {

@@ -297,6 +297,50 @@ mod tests {
     }
 
     #[test]
+    fn holding_the_erase_key_clears_what_was_typed() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Decrypt, W, H, PPD);
+        app.data_waiting(Some((0, Keys::Digits)));
+        for ch in "123456".chars() {
+            tap(&mut app, &f, &i, Action::Type(Cap::Char(ch)));
+        }
+        assert_eq!(app.state.code, "123456");
+        let (x, y) = spot(&mut app, &f, &i, Action::Type(Cap::Backspace));
+        let at = 1000;
+        app.touch(Touch::Down(x, y), &f, at);
+        assert_eq!(app.deadline(at), Some(at + LONG_PRESS_MS), "the press is timed");
+        assert!(app.tick(at + LONG_PRESS_MS - 1).is_empty(), "not held long enough yet");
+        assert_eq!(app.state.code, "123456", "one character at most is taken by a press");
+        assert_eq!(app.tick(at + LONG_PRESS_MS), vec![Effect::Haptic], "held long enough, all of it goes");
+        assert_eq!(app.state.code, "");
+        assert!(app.touch(Touch::Up, &f, at + LONG_PRESS_MS + 50).is_empty(), "the lift does nothing more");
+    }
+
+    #[test]
+    fn a_long_code_keeps_its_dots_on_the_page() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Decrypt, W, H, PPD);
+        app.data_waiting(Some((0, Keys::Digits)));
+        app.state.code = "1234567890".repeat(10);
+        let t = app.theme();
+        let accent = t.pal.accent;
+        let top = H as f32 - widgets::keypad_height(&t);
+        let fr = app.frame(&f, &i);
+        let (mut left, mut right) = (W as f32, 0.0f32);
+        for y in 0..top as u32 {
+            for x in 0..W {
+                let k = ((y * W + x) * 4) as usize;
+                if (fr.canvas.data[k], fr.canvas.data[k + 1], fr.canvas.data[k + 2], fr.canvas.data[k + 3]) == (accent.r, accent.g, accent.b, 255) {
+                    left = left.min(x as f32);
+                    right = right.max(x as f32);
+                }
+            }
+        }
+        assert!(left < right, "the dots are drawn");
+        assert!(left >= t.m.margin - 1.0 && right <= W as f32 - t.m.margin + 1.0, "the row {left}..{right} keeps within the margin");
+    }
+
+    #[test]
     fn an_unmounted_partition_says_so_and_is_decrypted_by_its_button() {
         let (f, i) = (fonts(), info());
         let mut app = App::new(Screen::Decrypt, W, H, PPD);

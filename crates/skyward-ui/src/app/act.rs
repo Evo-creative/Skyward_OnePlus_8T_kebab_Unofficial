@@ -567,6 +567,23 @@ impl App {
     }
 
     /// The text the keyboard types into on this page.
+    /// Clear the field the keys fill, where one is on the page: held, the
+    /// erase key takes the whole of it rather than a character at a time.
+    pub(super) fn clear_typing(&mut self) -> bool {
+        match self.screen() {
+            Screen::Search | Screen::Decrypt | Screen::Rename | Screen::WlanPassword | Screen::WlanAdd => {}
+            _ => return false,
+        }
+        let typed = self.typing();
+        if typed.is_empty() {
+            return false;
+        }
+        typed.clear();
+        self.edits += 1;
+        self.refresh();
+        true
+    }
+
     fn typing(&mut self) -> &mut String {
         match self.screen() {
             Screen::Search => &mut self.state.search,
