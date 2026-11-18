@@ -43,7 +43,7 @@ recovery 联网除 Skyward 自更新外没有用途，而本移植无法提供�
 | About Phone | ✅ | 实机确认信息正确 |
 | 终端 | ✅ | adb shell 正常 |
 | 截图 `Capture` | ✅ | 电源 + 音量下，PNG 存 `DCIM/Screenshots`，实机确认 |
-| Recovery 日志页 | 🟡 | 主页「Recovery 日志」入口，终端样式、无键盘；读 `/skyward/run/recovery.log`，待实机确认 |
+| Recovery 日志页 | ✅ | 主页「Recovery 日志」入口，终端样式、无键盘；读 `/skyward/run/recovery.log`，实机确认 |
 
 ### 1.3 存储与刷写
 
@@ -808,6 +808,7 @@ kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。�
 - ~~卸载后的「未挂载」页与重新解密~~ 已完成（`689854d`）：实机确认。
 - ~~fastbootd、槽位切换、语言切换、搜索/主题、分区页、截图~~ 已完成：2026-11-18 实机确认。
 - ~~从 fastbootd 进入后不振动~~ 已完成（`aa17296`）：见 §8.4。
+- ~~Recovery 日志页~~ 已完成（`4257bdf`）：主页入口在「高级」上方，终端样式、无键盘，跟随 `/skyward/run/recovery.log`，实机确认。
 - ~~Keymaster 4.x HIDL 客户端~~ 已完成（`bfe5a64` 起，见 §8.3）。
 - ~~LED 振动后端~~ 已完成（见 §8.4）。
 - ~~字体子集化~~ 已完成（见 §3.6）。
@@ -816,9 +817,8 @@ kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。�
 
 ### 9.2 待上机复查（已实现，未最终确认）
 
-1. **Recovery 日志页**：主页入口在「高级」上方；应能滚回旧行，日志增长时自动跟随。
-2. **「Flash Skyward again」**：会写 recovery，未验证。
-3. **显示超时观察**：若面板偶发超时，日志应出现 SDE register dump 但不再进 EDL（§8.3.3）。
+1. **「Flash Skyward again」**：会写 recovery，未验证。
+2. **显示超时观察**：若面板偶发超时，日志应出现 SDE register dump 但不再进 EDL（§8.3.3）。
 
 ### 9.3 按约定暂不实测（代码路径都在）
 
