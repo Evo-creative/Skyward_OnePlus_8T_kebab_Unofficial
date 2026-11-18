@@ -775,18 +775,19 @@ kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。�
 - HIDL boot control 的返回值按 `bool + string` 读
 - `[device] partition_size`：kebab 为 100 MiB，发布构建不带 `--size` 也能把 footer 放到分区末尾
 - 脚本的 `/tmp/update-binary` 用完即删
+- 安装（包括镜像刷写）前先收回 `/data`、卸载 `/cache`
+- 恢复 boot/system 前把槽标记为 unbootable，写完后重新标为 bootable
+- avbctl 的 `enable-verity`/`enable-verification` 不加 `--force` 直接拒绝：改 flags 会让 vbmeta 的签名失效
+- “保留 Skyward”只写**安装到的那个槽**，不再顺带写其它槽
 
 仍需决定/未修：
 
 1. **payload OTA 不验签**：“验证 zip 签名”只作用于安装脚本；`update_engine_sideload` 没有公钥，payload 的 pre-device 由 zip 自己声明。
 2. **OTA 后保留的 Skyward 仍是旧内核**：只按 codename 检查，没有比对 OTA 的构建/内核；即使 vbmeta 允许，也可能起不来显示、存储或按键。
-3. **「Flash Skyward again」**会写正在运行的 recovery（甚至两个槽），无备份/回滚；kebab 没有 Wi-Fi，当前入口也不会显示。
+3. **在线自更新**（GitHub 的「Flash Skyward again」，与安装页的“保留 Skyward”不是同一个）会写正在运行的 recovery，无备份/回滚；kebab 没有 Wi-Fi，当前入口不会显示。安装页的保留开关现在只写安装到的槽。
 4. **手动刷 `vbmeta`/`recovery` 不检查验证状态**：刷入启用验证的 vbmeta 会让未签名 recovery 无法启动。
-5. **avbctl 改 flags 会破坏 vbmeta 签名**；`enable-verification` 实际无法恢复一个可验证的镜像。
-6. 恢复备份后没有 `mark_unbootable`；写入中断仍可能留下半套 boot set。
-7. A/B “清除分区”包路径（`partwork::disable`）没有先卸载分区、收回 data。
-8. 压缩备份跳过剩余空间检查；`Boot` 备份包含 `recovery`，恢复会覆盖当前 Skyward。
-9. 安装脚本/OTA 期间没有卸载 `/data`、`/cache`、`/sdcard`。
+5. A/B “清除分区”包路径（`partwork::disable`）没有先卸载分区、收回 data。
+6. 压缩备份跳过剩余空间检查；`Boot` 备份包含 `recovery`，恢复会覆盖当前 Skyward。
 
 ## 9. 下一步
 
