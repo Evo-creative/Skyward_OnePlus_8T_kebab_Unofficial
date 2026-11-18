@@ -43,6 +43,7 @@ recovery 联网除 Skyward 自更新外没有用途，而本移植无法提供�
 | About Phone | ✅ | 实机确认信息正确 |
 | 终端 | ✅ | adb shell 正常 |
 | 截图 `Capture` | ✅ | 电源 + 音量下，PNG 存 `DCIM/Screenshots`，实机确认 |
+| Recovery 日志页 | 🟡 | 主页「Recovery 日志」入口，终端样式、无键盘；读 `/skyward/run/recovery.log`，待实机确认 |
 
 ### 1.3 存储与刷写
 
@@ -814,8 +815,9 @@ kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。�
 
 ### 9.2 待上机复查（已实现，未最终确认）
 
-1. **「Flash Skyward again」**：会写 recovery，未验证。
-2. **显示超时观察**：若面板偶发超时，日志应出现 SDE register dump 但不再进 EDL（§8.3.3）。
+1. **Recovery 日志页**：主页入口在「高级」上方；应能滚回旧行，日志增长时自动跟随。
+2. **「Flash Skyward again」**：会写 recovery，未验证。
+3. **显示超时观察**：若面板偶发超时，日志应出现 SDE register dump 但不再进 EDL（§8.3.3）。
 
 ### 9.3 按约定暂不实测（代码路径都在）
 
