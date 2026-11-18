@@ -479,7 +479,9 @@ pub mod kms {
 
     pub struct KmsSurface {
         card: Card,
-        bufs: [Buf; 3],
+        // One more than the panel needs, so an external reader is never
+        // reading a buffer while it is being redrawn.
+        bufs: [Buf; 4],
         /// The buffer the next frame goes into.
         back: usize,
         /// A frame was committed whose flip has not come yet.
@@ -632,7 +634,7 @@ pub mod kms {
                 }
                 Ok(Buf { db, fb, map: map.cast(), len })
             };
-            let bufs = [make()?, make()?, make()?];
+            let bufs = [make()?, make()?, make()?, make()?];
 
             let crtc_id = u64::from(u32::from(crtc));
             let mut req = atomic::AtomicModeReq::new();
