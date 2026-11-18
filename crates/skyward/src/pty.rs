@@ -52,7 +52,7 @@ impl Shell {
             .env("TERM", "xterm-256color")
             .env("HOME", "/")
             .env_remove("ANDROID_SOCKET_recovery")
-            .args(["-c", &format!("exec /system/bin/tail -n 200 -f {}", skyward_sys::LOG)]);
+            .args(["-c", &format!("exec /system/bin/tail -n 1000 -f {}", skyward_sys::LOG)]);
         Self::spawn(rows, cols, command)
     }
 

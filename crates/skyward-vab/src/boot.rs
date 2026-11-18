@@ -34,11 +34,13 @@ const GET_MERGE_STATUS: u32 = 4;
 const IS_BOOTABLE: u32 = 6;
 const IS_SUCCESSFUL: u32 = 7;
 const SET_ACTIVE_SLOT: u32 = 9;
+const SET_SLOT_UNBOOTABLE: u32 = 10;
 const SET_SNAPSHOT_MERGE_STATUS: u32 = 11;
 
 /// The methods, numbered as the older kind numbers them: the first
 /// version's in their order, then those each later version added.
 const SET_ACTIVE: u32 = 4;
+const SET_UNBOOTABLE: u32 = 5;
 const BOOTABLE: u32 = 6;
 const SUCCESSFUL: u32 = 7;
 const SET_MERGE_STATUS: u32 = 9;
@@ -61,6 +63,22 @@ pub fn next_slot() -> Result<Slot> {
     let (binder, hardware) = (Binder::open()?, Binder::hardware()?);
     let control = BootControl::open(&binder, &hardware)?;
     control.active()
+}
+
+/// Mark `slot` unbootable, so the bootloader does not start a set of
+/// partitions being written.
+pub fn set_unbootable(slot: Slot) -> Result<()> {
+    let (binder, hardware) = (Binder::open()?, Binder::hardware()?);
+    let control = BootControl::open(&binder, &hardware)?;
+    control.set_unbootable(slot)
+}
+
+/// Mark `slot` bootable and the slot to start next, as the boot control
+/// makes a slot after a successful write.
+pub fn set_active(slot: Slot) -> Result<()> {
+    let (binder, hardware) = (Binder::open()?, Binder::hardware()?);
+    let control = BootControl::open(&binder, &hardware)?;
+    control.set_active(slot)
 }
 
 /// Call `method` of the newer kind with what `args` writes, and read what
@@ -175,6 +193,18 @@ impl<'a> BootControl<'a> {
         Ok(())
     }
 
+    /// Mark `slot` unbootable while its partitions are written.
+    pub fn set_unbootable(&self, slot: Slot) -> Result<()> {
+        let what = || format!("mark slot {} unbootable", slot.letter());
+        match self {
+            BootControl::Newer(c) => newer(c, SET_SLOT_UNBOOTABLE, |p| p.i32(slot.number() as i32), |_| Ok(())).with_context(what),
+            BootControl::Older(c) => match older(c, FIRST, SET_UNBOOTABLE, |m| m.u32(slot.number()), command_result).with_context(what)? {
+                None => Ok(()),
+                Some(why) => bail!("the boot control would not {}: {why}", what()),
+            },
+        }
+    }
+
     /// Have the bootloader start `slot` next. The boot control gives it the
     /// tries a slot gets and takes away any mark that it does not start.
     pub fn set_active(&self, slot: Slot) -> Result<()> {
@@ -184,13 +214,7 @@ impl<'a> BootControl<'a> {
             BootControl::Older(c) => {
                 // The answer is whether it worked, and why not in text it
                 // points at.
-                let why = older(c, FIRST, SET_ACTIVE, |m| m.u32(slot.number()), |r| {
-                    if r.bool()? {
-                        return Ok(None);
-                    }
-                    let why = r.pointed()?;
-                    Ok(Some(String::from_utf8_lossy(why.split(|&b| b == 0).next().unwrap_or_default()).into_owned()))
-                })
+                let why = older(c, FIRST, SET_ACTIVE, |m| m.u32(slot.number()), command_result)
                 .with_context(what)?;
                 match why {
                     None => Ok(()),
@@ -199,6 +223,16 @@ impl<'a> BootControl<'a> {
             }
         }
     }
+}
+
+/// What the older kind answers to a command that changes something: whether
+/// it worked, and why not in the text after it.
+fn command_result(r: &mut Answer) -> Result<Option<String>> {
+    if r.bool()? {
+        return Ok(None);
+    }
+    let why = r.pointed()?;
+    Ok(Some(String::from_utf8_lossy(why.split(|&b| b == 0).next().unwrap_or_default()).into_owned()))
 }
 
 /// Whether what the older kind was asked holds of a slot.

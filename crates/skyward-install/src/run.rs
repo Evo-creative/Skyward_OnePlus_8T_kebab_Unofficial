@@ -70,7 +70,8 @@ pub struct Installer {
 
 impl Installer {
     /// Take USB over and wait for `adb sideload`, from a thread of its own.
-    /// `detach` runs before an update package or an install script writes;
+    /// `detach` runs before an update package, an image or an install script
+    /// writes;
     /// `options` say what else the install does.
     pub fn start(detach: Detach, options: Options) -> Result<Installer> {
         Installer::spawn(Origin::Computer, detach, options, run)
@@ -629,11 +630,16 @@ fn reflash(ctx: &Context, kept: &Kept, next: Result<Slot>) {
         Ok(next) => next,
         Err(e) => return ctx.send(Event::Reflashed(Reflash::Failed(format!("{e:#}")))),
     };
+    // Only the slot the package installs to, which the phone starts next:
+    // this recovery belongs in that slot's recovery partition, not in one
+    // the package left alone.
     let slots = match kept.wanted(next) {
-        Ok(slots) if slots.is_empty() => return,
-        Ok(slots) => slots,
+        Ok(slots) => slots.into_iter().filter(|&slot| slot == next).collect::<Vec<_>>(),
         Err(e) => return ctx.send(Event::Reflashed(Reflash::Failed(format!("{e:#}")))),
     };
+    if slots.is_empty() {
+        return;
+    }
     // This recovery is not signed. Writing it into a slot whose vbmeta
     // checks what it boots makes that whole slot unbootable, so it is left
     // as the package wrote it.
@@ -804,7 +810,7 @@ fn lines(from: impl Read, mut each: impl FnMut(&str) -> io::Result<()>) -> io::R
     }
 }
 
-fn flash_image(ctx: &Context, kind: ImageKind, size: u64) -> Result<Done> {
+fn flash_image(ctx: &mut Context, kind: ImageKind, size: u64) -> Result<Done> {
     let dir = Path::new(skyward_block::BY_NAME);
     let partitions = image::partitions(kind, dir)?;
     if partitions.is_empty() {
@@ -821,6 +827,7 @@ fn flash_image(ctx: &Context, kind: ImageKind, size: u64) -> Result<Done> {
     if [skyward_systems::store::BOOT, skyward_systems::store::INIT_BOOT].contains(&partition) {
         installed_boot_set()?;
     }
+    detach_once(ctx)?;
     let devices: Vec<_> = slots.iter().map(|&slot| image::device(dir, partition, slot)).collect();
     let mut file = BufReader::with_capacity(1 << 20, File::open(fuse::PACKAGE).context("open the package")?);
     let mut told: Option<Instant> = None;

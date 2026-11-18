@@ -1015,6 +1015,23 @@ fn detach(services: Vec<Service>) -> Detach {
     })
 }
 
+/// What has to happen before an install writes: the data partition is let
+/// go, so a package or script does not write under a mounted filesystem,
+/// and then what [`detach`] does.
+fn detach_for_install(services: Vec<Service>) -> Detach {
+    Box::new(move || {
+        crate::wipe::release_data().context("close the data partition before installing")?;
+        let cache = Path::new("/cache");
+        if mount::is_mount_point(cache)? {
+            mount::umount(cache).context("unmount /cache before installing")?;
+        }
+        let slot = skyward_vab::current_slot()?.context("not an A/B phone")?;
+        let mounted = skyward_vab::mounted_partitions(slot)?;
+        let busy = services::pin(&services, &mounted)?;
+        skyward_vab::release_partitions(slot, &busy)
+    })
+}
+
 /// What an install does besides installing, as the install page's switches
 /// are set: puts Skyward back into the recovery partitions it writes over,
 /// on a phone that has them, and checks a zip's signature before its
@@ -1475,7 +1492,7 @@ impl<'a> Pages<'a> {
             }
             Work::Sideload { .. } => {
                 self.app.start_sideload();
-                self.installer = Some(Installer::start(detach(self.programs.to_vec()), install_options(&self.app))?);
+                self.installer = Some(Installer::start(detach_for_install(self.programs.to_vec()), install_options(&self.app))?);
                 self.sideloading = true;
             }
             Work::Rescue => {
@@ -2607,18 +2624,18 @@ impl Pages<'_> {
             }
             Effect::Sideload => {
                 if self.may_install(now)? {
-                    self.installer = Some(Installer::start(detach(self.programs.to_vec()), install_options(&self.app))?);
+                    self.installer = Some(Installer::start(detach_for_install(self.programs.to_vec()), install_options(&self.app))?);
                     self.sideloading = true;
                 }
             }
             Effect::InstallFile(place, path) => {
                 if self.may_install(now)? {
-                    self.installer = Some(Installer::open(in_place(place, &path), detach(self.programs.to_vec()), install_options(&self.app))?);
+                    self.installer = Some(Installer::open(in_place(place, &path), detach_for_install(self.programs.to_vec()), install_options(&self.app))?);
                 }
             }
             Effect::InstallPath(path) => {
                 if self.may_install(now)? {
-                    self.installer = Some(Installer::open(PathBuf::from(path), detach(self.programs.to_vec()), install_options(&self.app))?);
+                    self.installer = Some(Installer::open(PathBuf::from(path), detach_for_install(self.programs.to_vec()), install_options(&self.app))?);
                 }
             }
             Effect::Flash { partition, pick } => {

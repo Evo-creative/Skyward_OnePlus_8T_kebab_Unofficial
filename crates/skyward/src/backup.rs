@@ -528,6 +528,14 @@ fn restore(t: RestoreTask, tell: &dyn Fn(Event), cancel: &AtomicBool) -> Result<
     if items.iter().any(|i| i.part == Part::Boot) {
         skyward_systems::install::ensure_installed()?;
     }
+    // A slot whose boot set is about to be written is marked unbootable
+    // first, so the bootloader does not start a set half restored. Only the
+    // slot the bootloader would start is marked: another is not booted yet.
+    let writing_boot = items.iter().any(|i| matches!(i.part, Part::Boot | Part::System));
+    let protect = writing_boot && skyward_vab::boot::next_slot().is_ok_and(|next| next == slot);
+    if protect {
+        skyward_vab::boot::set_unbootable(slot).context("mark the slot unbootable while it is restored")?;
+    }
     // Once anything is written, the restore goes on to its end.
     let go_on = AtomicBool::new(false);
     let skipped = Skipped::new(&t.skipped);
@@ -560,6 +568,11 @@ fn restore(t: RestoreTask, tell: &dyn Fn(Event), cancel: &AtomicBool) -> Result<
         skyward_sys::kmsg(&format!("restored {}", item.name))?;
     }
     unsafe { libc::sync() };
+    // The boot set is whole again: the slot is bootable, and still the one
+    // that starts next.
+    if protect {
+        skyward_vab::boot::set_active(slot).context("mark the restored slot bootable")?;
+    }
     Ok(unmade)
 }
 

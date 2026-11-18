@@ -46,6 +46,11 @@ Commands:
   avbctl enable-verification  - Enable verification in current slot.
 ";
 
+const UNSIGNED: &str = "\
+avbctl: enabling a check changes the vbmeta header, which its signature covers.\n\
+There is no way to sign it again here; reflash the phone's stock vbmeta instead.\n\
+Run with --force to change it all the same.\n";
+
 const LOCKED: &str = "\
 avbctl: the bootloader is locked, and a locked bootloader does not boot a slot
 whose vbmeta image has been changed. Run with --force to change it all the same.
@@ -134,6 +139,10 @@ fn avbctl(args: &[OsString], io: &mut Io, phone: &Phone) -> i32 {
     match command {
         Command::Get(_) => say(io, &format!("{} is {}{slot}.\n", check.name(), state(on))),
         Command::Set(_, want) if want == on => say(io, &format!("{} is already {}{slot}.\n", check.name(), state(on))),
+        Command::Set(_, true) if !force => {
+            let _ = io.errors.write_all(UNSIGNED.as_bytes());
+            return REFUSED;
+        }
         Command::Set(_, want) => {
             if phone.locked && !force {
                 let _ = io.errors.write_all(LOCKED.as_bytes());
@@ -269,12 +278,14 @@ mod tests {
         assert_eq!(fs::read(&a).unwrap(), vbmeta(3));
         assert_eq!(ran(&["get-verification"], &phone).1, "verification is disabled on slot with suffix _a.\n");
         assert_eq!(ran(&["get-verity"], &phone).1, "verity is disabled on slot with suffix _a.\n");
+        assert_eq!(ran(&["enable-verity"], &phone), (77, String::new(), UNSIGNED.into()), "enabling would leave the vbmeta unsigned");
+        assert_eq!(fs::read(&a).unwrap(), vbmeta(3), "nothing written");
         assert_eq!(
-            ran(&["enable-verity"], &phone).1,
+            ran(&["--force", "enable-verity"], &phone).1,
             "Successfully enabled verity on slot with suffix _a. Reboot the device for changes to take effect.\n"
         );
         assert_eq!(fs::read(&a).unwrap(), vbmeta(2));
-        assert_eq!(ran(&["enable-verification"], &phone).0, 0);
+        assert_eq!(ran(&["--force", "enable-verification"], &phone).0, 0);
         assert_eq!(fs::read(&a).unwrap(), vbmeta(0));
         assert_eq!(fs::read(&b).unwrap(), vbmeta(0), "the other slot's as it was");
     }
@@ -285,7 +296,12 @@ mod tests {
         fs::write(dir.path().join("vbmeta"), vbmeta(2)).unwrap();
         let phone = Phone { by_name: dir.path(), suffix: "", locked: false };
         assert_eq!(ran(&["get-verification"], &phone).1, "verification is disabled.\n");
-        assert_eq!(ran(&["enable-verification"], &phone).1, "Successfully enabled verification. Reboot the device for changes to take effect.\n");
+        assert_eq!(ran(&["enable-verification"], &phone), (77, String::new(), UNSIGNED.into()));
+        assert_eq!(fs::read(dir.path().join("vbmeta")).unwrap(), vbmeta(2), "nothing written");
+        assert_eq!(
+            ran(&["--force", "enable-verification"], &phone).1,
+            "Successfully enabled verification. Reboot the device for changes to take effect.\n"
+        );
         assert_eq!(fs::read(dir.path().join("vbmeta")).unwrap(), vbmeta(0));
     }
 

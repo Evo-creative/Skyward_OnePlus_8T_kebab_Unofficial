@@ -1008,9 +1008,9 @@ pub fn install(cx: &Ctx) -> Frame {
         let options = widgets::list(&mut c, t, f, y + t.m.card_gap, &[row]);
         out.extend(hits(&options.rows, &[Action::Toggle(Switch::KeepRecovery)]));
         let note = l.pick([
-            "开启后，安装系统更新或刷机包时被覆盖的 recovery 分区将重新刷入 Skyward。",
-            "開啟後，安裝系統更新或刷機包時被覆寫的 recovery 分割區將重新刷入 Skyward。",
-            "When on, Skyward goes back into the recovery partitions a system update or flashable zip writes over.",
+            "开启后，安装系统更新或刷机包时，会把 Skyward 重新刷入安装到的那个槽的 recovery 分区。",
+            "開啟後，安裝系統更新或刷機包時，會把 Skyward 重新刷入安裝到的那個槽的 recovery 分割區。",
+            "When on, Skyward goes back into the recovery partition of the slot the update or package installs to.",
         ]);
         y = widgets::footnote(&mut c, t, f, options.bottom, note);
     }
