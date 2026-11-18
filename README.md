@@ -15,8 +15,8 @@ Skyward is a recovery written in Rust, from scratch.
 ## Building for the OnePlus 8T (kebab)
 
 This fork builds Skyward for the OnePlus 8T (kebab), on the recovery the phone
-already has. What was tried and what broke is in
-[docs/kebab-port.md](docs/kebab-port.md).
+already has, and is ported by [Evo-creative](https://github.com/Evo-creative).
+What was tried and what broke is in [docs/kebab-port.md](docs/kebab-port.md).
 
 Against Skyward, this port adds a Keymaster 4.x HIDL client (kebab has no KeyMint
 AIDL), boot header v2, an AW8697 LED haptics backend, a DRM recovery event so a

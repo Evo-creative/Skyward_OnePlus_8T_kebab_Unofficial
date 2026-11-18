@@ -14,7 +14,7 @@ Skyward 是使用 Rust 编写的 recovery，从零开始编写。
 
 ## 为 OnePlus 8T（kebab）构建
 
-这个分支用手机里原有的 recovery 为 OnePlus 8T（kebab）构建 Skyward。过程与踩坑见 [docs/kebab-port.md](docs/kebab-port.md)。
+这个分支用手机里原有的 recovery 为 OnePlus 8T（kebab）构建 Skyward，由 [Evo-creative](https://github.com/Evo-creative) 移植。过程与踩坑见 [docs/kebab-port.md](docs/kebab-port.md)。
 
 与 Skyward 相比，这个移植多了：Keymaster 4.x HIDL 客户端（kebab 没有 KeyMint AIDL）、boot header v2、AW8697 的 LED 振动后端、注册 DRM 恢复事件（显示提交失败不再 panic 进 EDL）、解密页卸载 data 分区、状态栏时钟避开前摄开孔。少了：Wi-Fi、Skyward 在线更新、双系统。
 
