@@ -20,10 +20,10 @@ Skyward 是使用 Rust 编写的 recovery，从零开始编写。
 
 | 状态 | 功能 |
 |---|---|
-| 已证实 | 启动、120Hz UI、触摸、背光、振动、data 解密（user 0/10）、文件管理、MTP、adb、截图、时区、时钟避开开孔 |
-| 未证实 | 卸载后重新解密、长按删除清空、备份/恢复、刷镜像、zip 与 payload、擦除/格式化/工厂重置、fastbootd、槽位切换、AVB、语言切换、搜索与主题、分区页、「Flash Skyward again」 |
+| 已证实 | 启动、120Hz UI、触摸、背光、振动、data 解密（user 0/10）、Data 卸载后重新解密、Data 解密输入长按删除清空、文件管理、MTP、adb、截图、时区、时钟避开开孔、fastbootd、槽位切换、语言切换、搜索与主题、分区页 |
+| 未证实 | 备份/恢复、刷镜像、zip 与 payload、擦除/格式化/工厂重置、AVB、「Flash Skyward again」 |
 | 未实现 | Wi-Fi（supplicant 的 vendor AIDL 服务注册不上）、振动波形 |
-| 实现不了 | 双系统（没有 `init_boot`）；第三方移植的 Skyward 在线更新 |
+| 实现不了 | 双系统（没有 `init_boot`） |
 
 ### 刷入
 

@@ -26,10 +26,10 @@ Wi-Fi, Skyward's online update and dual boot.
 
 | Status | What |
 |---|---|
-| Verified on the phone | boot, 120 Hz UI, touch, backlight, vibration, `/data` decryption (users 0 and 10), file manager, MTP, adb, screenshots, time zones, the clock past the punch hole |
-| Built, not verified | unmounting and decrypting `/data` again, holding erase to clear a code, backup/restore, images, zips and payload OTAs, erase/format/factory reset, fastbootd, slot switching, AVB, language switching, search and theme, partition pages, "Flash Skyward again" |
+| Verified on the phone | boot, 120 Hz UI, touch, backlight, vibration, `/data` decryption (users 0 and 10), decrypting `/data` again after unmounting, holding erase to clear the code at `/data` decryption, file manager, MTP, adb, screenshots, time zones, the clock past the punch hole, fastbootd, slot switching, language switching, search and theme, partition pages |
+| Built, not verified | backup/restore, images, zips and payload OTAs, erase/format/factory reset, AVB, "Flash Skyward again" |
 | Not implemented | Wi-Fi (the supplicant's vendor AIDL service will not register), vibration waveforms |
-| Not possible | dual boot (no `init_boot`); Skyward's online update for a third-party port |
+| Not possible | dual boot (no `init_boot`) |
 
 ### Flashing
 
