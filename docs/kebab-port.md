@@ -1,7 +1,7 @@
 # Skyward 移植到 OnePlus 8T（kebab）记录
 
 日期：2026-11-18（首版 2026-11-17）
-基线：Skyward v0.3.1（`crates/` 工作区），LineageOS 24.0 的 `recovery.img`；本移植版本号 `0.3.1-kebab`，移植者 Evo-creative
+基线：Skyward v0.3.1（`crates/` 工作区），LineageOS 24.0 的 `recovery.img`；本移植版本号 `0.3.1-kebab`
 
 ## 1. 现状摘要
 

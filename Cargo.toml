@@ -30,7 +30,6 @@ members = [
 version = "0.3.1-kebab"
 edition = "2024"
 license = "GPL-3.0-or-later"
-authors = ["Evo-creative"]
 
 [workspace.dependencies]
 libc = "0.2.175"
