@@ -235,13 +235,15 @@ impl Plan {
             None => erase::discard(Path::new(&device)),
         }
         .map_err(failed(Step::Data))?;
-        let made_as = |entry: &Entry| self.reformat.clone().unwrap_or_else(|| entry.filesystem.clone());
+        // A filesystem the system asked for is the data partition's; the
+        // others are made as the phone's table names them, as the system
+        // mounts them by that table on the next start.
         if let Some(cache) = &self.cache {
             tell(Event::At(Step::Cache));
-            remake_cache(cache, &made_as(cache)).map_err(failed(Step::Cache))?;
+            remake_cache(cache, &cache.filesystem).map_err(failed(Step::Cache))?;
         }
         tell(Event::At(Step::Metadata));
-        remake(&self.metadata, &made_as(&self.metadata)).map_err(failed(Step::Metadata))?;
+        remake(&self.metadata, &self.metadata.filesystem).map_err(failed(Step::Metadata))?;
         if !keep_memtag_mode {
             bcb::forget_memtag_mode(&bcb::misc()).map_err(failed(Step::Metadata))?;
         }

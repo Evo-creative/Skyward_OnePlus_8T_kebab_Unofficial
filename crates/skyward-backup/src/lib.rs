@@ -8,7 +8,7 @@ use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use skyward_files::Ownership;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Component, Path};
 
 /// The file in a backup's folder that records what the backup holds. It is
 /// written last, so a folder with one holds a whole backup.
@@ -70,6 +70,17 @@ pub struct Item {
     pub stored: store::Stored,
 }
 
+/// Whether `name` is a partition's name, as the phone's tables write one.
+fn partition_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+}
+
+/// Whether `name` is a file in the backup's own folder, and not a path
+/// through or out of it.
+fn file_name(name: &str) -> bool {
+    matches!(Path::new(name).components().collect::<Vec<_>>().as_slice(), [Component::Normal(_)])
+}
+
 impl Manifest {
     /// The manifest in the backup's `folder`.
     pub fn read(folder: &Path) -> Result<Manifest> {
@@ -77,6 +88,15 @@ impl Manifest {
         let text = std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
         let manifest: Manifest = toml::from_str(&text).with_context(|| format!("read {}", path.display()))?;
         ensure!(manifest.format == FORMAT, "{} is in layout {}, which this recovery does not read", path.display(), manifest.format);
+        for item in &manifest.items {
+            ensure!(partition_name(&item.name), "{} names the partition {:?} in a way this recovery does not read", path.display(), item.name);
+            if item.part == Part::Data {
+                ensure!(item.name == "data", "{} names the data partition {:?}", path.display(), item.name);
+            }
+            for file in &item.stored.files {
+                ensure!(file_name(file), "{} keeps {:?} outside its folder", path.display(), file);
+            }
+        }
         Ok(manifest)
     }
 
@@ -126,6 +146,30 @@ mod tests {
         assert_eq!(Manifest::read(&at).unwrap(), m);
         assert_eq!(m.parts(), [true, false, true, false]);
         assert_eq!(m.size(), 100_663_296 + 4_500_000_000);
+        std::fs::remove_dir_all(&at).unwrap();
+    }
+
+    #[test]
+    fn a_manifest_may_not_name_a_path_outside_its_folder() {
+        let at = std::env::temp_dir().join(format!("skyward-manifest-outside-{}", std::process::id()));
+        std::fs::create_dir_all(&at).unwrap();
+        let stored = Stored { files: vec!["boot.000".into()], size: 1, stored: 1, compressed: true, sha256: "ab".repeat(32) };
+        let m = Manifest {
+            format: FORMAT,
+            device: "kebab".into(),
+            made: 1,
+            slot: "_a".into(),
+            system: None,
+            data_key: None,
+            items: vec![Item { part: Part::Boot, name: "boot".into(), stored }],
+        };
+        m.write(&at, Ownership::Kept).unwrap();
+        let path = at.join(MANIFEST);
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, text.replace("name = \"boot\"", "name = \"../boot\"")).unwrap();
+        assert!(Manifest::read(&at).is_err(), "a partition out of the phone's tables is refused");
+        std::fs::write(&path, text.replace("boot.000", "../boot.000")).unwrap();
+        assert!(Manifest::read(&at).is_err(), "a file out of the backup's folder is refused");
         std::fs::remove_dir_all(&at).unwrap();
     }
 }

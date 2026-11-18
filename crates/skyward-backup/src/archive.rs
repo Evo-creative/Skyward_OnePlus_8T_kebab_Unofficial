@@ -243,6 +243,23 @@ struct Records {
     mtime: Option<(i64, u32)>,
 }
 
+/// Refuse an entry whose folders on the way are symbolic links: a restore
+/// as root would otherwise follow one outside the partition.
+fn no_symlinked_parent(root: &Path, rel: &Path) -> Result<()> {
+    let mut at = root.to_path_buf();
+    let mut parts = rel.components().peekable();
+    while let Some(part) = parts.next() {
+        if parts.peek().is_none() {
+            break;
+        }
+        at.push(part);
+        if fs::symlink_metadata(&at).is_ok_and(|m| m.file_type().is_symlink()) {
+            bail!("{} is a symbolic link", at.display());
+        }
+    }
+    Ok(())
+}
+
 /// Make the files of `root` what the archive from `input` holds: each entry
 /// as it was archived, with all it had beyond its contents, a folder that
 /// is there already kept as it is; then take away what the archive does
@@ -267,6 +284,7 @@ pub fn unpack(input: impl Read, root: &Path, skipped: &Skipped, cancel: &AtomicB
         let records = records(&mut entry).with_context(|| format!("read what the archive holds of {}", rel.display()))?;
         let header = entry.header().clone();
         let path = root.join(&rel);
+        no_symlinked_parent(root, &rel).with_context(|| format!("look at the folders {} is in", rel.display()))?;
         let mtime = records.mtime.unwrap_or((header.mtime()? as i64, 0));
         let made = (|| -> Result<bool> {
             match header.entry_type() {
@@ -325,8 +343,15 @@ pub fn unpack(input: impl Read, root: &Path, skipped: &Skipped, cancel: &AtomicB
                 }
                 EntryType::Link => {
                     let first = entry.link_name().context("read what it is another name of")?.context("it names no file")?.into_owned();
+                    let target = Path::new(&first);
+                    ensure!(
+                        !target.is_absolute() && target.components().all(|c| matches!(c, Component::Normal(_))),
+                        "the archive hard-links {}, which is outside its folder",
+                        first.display()
+                    );
+                    no_symlinked_parent(root, target).with_context(|| format!("look at the folders {} is in", first.display()))?;
                     remove_any(&path)?;
-                    fs::hard_link(root.join(first), &path).context("make it")?;
+                    fs::hard_link(root.join(target), &path).context("make it")?;
                 }
                 EntryType::Char | EntryType::Block | EntryType::Fifo => {
                     remove_any(&path)?;
@@ -680,6 +705,59 @@ mod tests {
 
     fn skipped() -> Skipped {
         Skipped::new(&["media".into(), "system_de/*/spblob".into()])
+    }
+
+    #[test]
+    fn a_backup_may_not_write_through_a_link_it_makes() {
+        let mut b = Builder::new(Vec::new());
+        let mut link = Header::new_gnu();
+        link.set_entry_type(EntryType::Symlink);
+        link.set_size(0);
+        link.set_mode(0o777);
+        link.set_uid(unsafe { libc::getuid() } as u64);
+        link.set_gid(unsafe { libc::getgid() } as u64);
+        link.set_mtime(0);
+        link.set_cksum();
+        b.append_link(&mut link, "escape", "/tmp").unwrap();
+        let mut file = Header::new_gnu();
+        file.set_entry_type(EntryType::Regular);
+        file.set_size(2);
+        file.set_mode(0o644);
+        file.set_uid(unsafe { libc::getuid() } as u64);
+        file.set_gid(unsafe { libc::getgid() } as u64);
+        file.set_mtime(0);
+        file.set_cksum();
+        b.append_data(&mut file, "escape/file", &b"no"[..]).unwrap();
+        let archive = b.into_inner().unwrap();
+        let root = scratch("escape");
+        let skipped = Skipped::new(&[]);
+        let refused = unpack(archive.as_slice(), &root, &skipped, &AtomicBool::new(false), &mut |_| {});
+        let why = format!("{:#}", refused.expect_err("the archive writes through a link"));
+        assert!(why.contains("symbolic link"), "{why}");
+        assert!(!Path::new("/tmp/file").exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_backup_may_not_hard_link_a_file_outside_its_folder() {
+        let mut b = Builder::new(Vec::new());
+        let mut link = Header::new_gnu();
+        link.set_entry_type(EntryType::Link);
+        link.set_size(0);
+        link.set_mode(0o644);
+        link.set_uid(unsafe { libc::getuid() } as u64);
+        link.set_gid(unsafe { libc::getgid() } as u64);
+        link.set_mtime(0);
+        link.set_cksum();
+        b.append_link(&mut link, "passwd", "/etc/passwd").unwrap();
+        let archive = b.into_inner().unwrap();
+        let root = scratch("hard-link");
+        let skipped = Skipped::new(&[]);
+        let refused = unpack(archive.as_slice(), &root, &skipped, &AtomicBool::new(false), &mut |_| {});
+        let why = format!("{:#}", refused.expect_err("the archive links outside its folder"));
+        assert!(why.contains("outside its folder"), "{why}");
+        assert!(!root.join("passwd").exists());
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

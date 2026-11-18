@@ -311,6 +311,10 @@ pub struct Device {
     pub model: String,
     #[serde(default = "default_true")]
     pub ab: bool,
+    /// The recovery partition's size in bytes, where the stock image fills
+    /// less of it: the packer pads the image and its footer to this.
+    #[serde(default)]
+    pub partition_size: Option<u64>,
     /// SoC marketing name shown on the About page.
     #[serde(default)]
     pub soc: Option<Names>,

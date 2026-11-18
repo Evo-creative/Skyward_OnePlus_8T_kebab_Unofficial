@@ -130,7 +130,8 @@ fn main() -> Result<()> {
             write(&out, &img, &img.to_bytes()?)
         }
         Cmd::Recovery { stock, binary, system_init, config, font, mono, mono_license, size, out } => {
-            let size = match size {
+            let cfg = skyward_config::DeviceConfig::load(&config)?;
+            let size = match size.or(cfg.device.partition_size) {
                 Some(size) => usize::try_from(size).context("partition size")?,
                 None => partition_size(&stock)?,
             };
@@ -147,7 +148,6 @@ fn main() -> Result<()> {
                 anyhow::bail!("{} holds {}, which is not a stock recovery", stock.display(), e.name);
             }
             let read = |p: &PathBuf| std::fs::read(p).with_context(|| format!("read {}", p.display()));
-            skyward_config::DeviceConfig::load(&config)?;
             rd.replace(paths::RECOVERY, read(&binary)?)?;
             // Install scripts look for the commands a stock recovery lacks
             // among its programs, and its unzip there too, a link to ziptool

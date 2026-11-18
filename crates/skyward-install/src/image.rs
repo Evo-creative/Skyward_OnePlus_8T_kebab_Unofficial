@@ -188,6 +188,11 @@ pub fn partitions(kind: ImageKind, dir: &Path) -> Result<Vec<&'static str>> {
             let path = device(dir, name, slot);
             has &= path.try_exists().with_context(|| format!("look for {}", path.display()))?;
         }
+        // A phone with a recovery partition of its own takes the recovery
+        // ramdisk there; its boot partition belongs to the system.
+        if has && *name == "boot" && found.contains(&"recovery") {
+            continue;
+        }
         if has {
             found.push(*name);
         }
@@ -223,28 +228,35 @@ pub fn flash<R: Read + Seek>(image: &mut R, len: u64, devices: &[PathBuf], progr
     let (gap, tail): (u64, &[u8]) = if moved { (size - len - FOOTER_LEN, &footer) } else { (0, &[]) };
     let end = len + gap + tail.len() as u64;
     let total = end * outs.len() as u64 * 2;
-    let mut source = image.take(len).chain(io::repeat(0).take(gap)).chain(tail);
 
     let mut buf = vec![0u8; CHUNK];
-    let mut written = Sha256::new();
     let mut done = 0;
-    let mut at = 0;
-    while at < end {
-        let n = (end - at).min(CHUNK as u64) as usize;
-        source.read_exact(&mut buf[..n]).context("read the image")?;
-        written.update(&buf[..n]);
-        for (path, f, _) in &mut outs {
+    // Finish one partition before the next starts, so a failure leaves the
+    // others as they were rather than every slot half written.
+    let mut written: Option<[u8; 32]> = None;
+    for (path, f, _) in &mut outs {
+        image.seek(SeekFrom::Start(0)).context("rewind the image")?;
+        let mut source = (&mut *image).take(len).chain(io::repeat(0).take(gap)).chain(tail);
+        let mut digest = Sha256::new();
+        let mut at = 0;
+        while at < end {
+            let n = (end - at).min(CHUNK as u64) as usize;
+            source.read_exact(&mut buf[..n]).context("read the image")?;
+            digest.update(&buf[..n]);
             f.write_all(&buf[..n]).with_context(|| format!("write {}", path.display()))?;
             done += n as u64;
             progress(done, total);
+            at += n as u64;
         }
-        at += n as u64;
-    }
-    let written = written.finalize();
-    for (path, f, _) in &mut outs {
         f.sync_all().with_context(|| format!("flush {}", path.display()))?;
         drop_cache(f).with_context(|| format!("drop the cached pages of {}", path.display()))?;
+        let digest: [u8; 32] = digest.finalize().into();
+        match written {
+            Some(before) => ensure!(before == digest, "the image reads differently for {}", path.display()),
+            None => written = Some(digest),
+        }
     }
+    let written = written.expect("at least one partition is written");
     for (path, f, _) in &mut outs {
         f.seek(SeekFrom::Start(0)).with_context(|| format!("rewind {}", path.display()))?;
         let mut back = Sha256::new();
@@ -257,7 +269,8 @@ pub fn flash<R: Read + Seek>(image: &mut R, len: u64, devices: &[PathBuf], progr
             done += n as u64;
             progress(done, total);
         }
-        ensure!(back.finalize() == written, "{} reads back different from what was written", path.display());
+        let back = back.finalize();
+        ensure!(back.as_slice() == written, "{} reads back different from what was written", path.display());
     }
     Ok(())
 }
@@ -353,7 +366,7 @@ mod tests {
         assert_eq!(kind, ImageKind::Boot { kernel: false, ramdisk: Ramdisk::Generic });
         assert_eq!(kind.partitions(), ["init_boot"]);
         let kind = kind_of(&boot_image(5000, &recovery)).unwrap().unwrap();
-        assert_eq!(kind.partitions(), ["recovery", "boot"]);
+        assert_eq!(kind.partitions(), ["recovery", "boot"], "where the phone has no recovery partition, boot takes it");
         let kind = kind_of(&boot_image(5000, &lz4_legacy(&generic))).unwrap().unwrap();
         assert_eq!(kind, ImageKind::Boot { kernel: true, ramdisk: Ramdisk::Generic });
         assert_eq!(kind.partitions(), ["boot"]);
@@ -415,7 +428,7 @@ mod tests {
             std::fs::File::create(dir.path().join(name)).unwrap();
         }
         let both = ImageKind::Boot { kernel: true, ramdisk: Ramdisk::Recovery };
-        assert_eq!(partitions(both, dir.path()).unwrap(), ["recovery", "boot"]);
+        assert_eq!(partitions(both, dir.path()).unwrap(), ["recovery"], "a recovery partition of its own keeps boot for the system");
         assert_eq!(partitions(ImageKind::Vbmeta, dir.path()).unwrap(), ["vbmeta"]);
         assert!(partitions(ImageKind::Dtbo, dir.path()).unwrap().is_empty());
     }

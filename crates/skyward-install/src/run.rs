@@ -625,11 +625,37 @@ fn hold(ctx: &Context, current: Slot) -> Result<Option<Kept>> {
 /// over and into that of `next`, the slot that starts next, telling the
 /// screen how far it is and then how it went.
 fn reflash(ctx: &Context, kept: &Kept, next: Result<Slot>) {
-    let slots = match next.and_then(|next| kept.wanted(next)) {
+    let next = match next {
+        Ok(next) => next,
+        Err(e) => return ctx.send(Event::Reflashed(Reflash::Failed(format!("{e:#}")))),
+    };
+    let slots = match kept.wanted(next) {
         Ok(slots) if slots.is_empty() => return,
         Ok(slots) => slots,
         Err(e) => return ctx.send(Event::Reflashed(Reflash::Failed(format!("{e:#}")))),
     };
+    // This recovery is not signed. Writing it into a slot whose vbmeta
+    // checks what it boots makes that whole slot unbootable, so it is left
+    // as the package wrote it.
+    let mut checked = Vec::with_capacity(slots.len());
+    for &slot in &slots {
+        match crate::commands::avbctl::verification_on(Path::new(skyward_block::BY_NAME), slot.suffix()) {
+            Ok(on) => checked.push(on),
+            Err(e) => {
+                let _ = kmsg(&format!("install: could not tell whether slot {} checks what it boots: {e:#}", slot.letter()));
+                return ctx.send(Event::Reflashed(Reflash::Failed(format!(
+                    "could not tell whether slot {} checks what it boots: {e:#}",
+                    slot.letter()
+                ))));
+            }
+        }
+    }
+    if checked.iter().any(|&on| on) {
+        let _ = kmsg("install: the slot that starts next checks what it boots, so this recovery is not written into it");
+        return ctx.send(Event::Reflashed(Reflash::Failed(
+            "the slot that starts next checks what it boots, so this recovery was not written into it; disable verification before keeping it".into(),
+        )));
+    }
     let mut told: Option<Instant> = None;
     let written = kept.write(&slots, &mut |done, total| {
         if done == total || told.is_none_or(|t| t.elapsed() >= PROGRESS_EVERY) {
@@ -844,10 +870,17 @@ fn run_script(ctx: &mut Context, size: u64) -> Result<Done> {
     shell_at_sbin()?;
     let kept = hold(ctx, slot)?;
     installed_boot_set()?;
+    // Whether an update is in flight is read before anything moves off the
+    // installed system: taking the slot's snapshot devices away would stop
+    // a merge that is under way.
+    let snapshot = skyward_vab::snapshot_state()?;
+    if matches!(snapshot, SnapshotState::Merging) {
+        return Ok(Done::Decided(Outcome::Refused(Refusal::Pending(snapshot))));
+    }
     detach_once(ctx)?;
     // While an update is in flight, the slot's partitions in super are its
     // and stay unmapped.
-    let mapped = match skyward_vab::snapshot_state()? {
+    let mapped = match snapshot {
         SnapshotState::None => skyward_vab::map_slot(slot)?,
         state => {
             let _ = kmsg(&format!("install: the slot's partitions stay unmapped while an update is in flight ({state:?})"));
@@ -856,6 +889,7 @@ fn run_script(ctx: &mut Context, size: u64) -> Result<Done> {
     };
     let mounted = skyward_block::mount::mount_ids()?;
     let ran = run_binary(ctx);
+    let _ = fs::remove_file(BINARY);
     if let Err(e) = clean_up(&mounted, &mapped) {
         let _ = kmsg(&format!("install: not all the script left behind was taken away: {e:#}"));
     }

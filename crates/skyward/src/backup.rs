@@ -365,6 +365,9 @@ fn backup(t: BackupTask, tell: &dyn Fn(Event), cancel: &AtomicBool) -> Result<Pa
         mount::remount_writable(at, true)?;
     }
     let folder = t.into.join(&t.stamp);
+    // A backup made in this same second is not overwritten, and a folder
+    // left by this same name is not taken to be this run's to clear away.
+    ensure!(!folder.exists(), "a backup named {} is there already", t.stamp);
     let made = (|| -> Result<()> {
         skyward_files::make_folders(&folder, t.ownership)?;
         let mut items = Vec::new();
@@ -465,6 +468,15 @@ fn restore(t: RestoreTask, tell: &dyn Fn(Event), cancel: &AtomicBool) -> Result<
         return Err(Refusal::OtherPhone(manifest.device).into());
     }
     let slot = skyward_vab::current_slot()?.context("not an A/B phone")?;
+    // A backup of one slot's boot set and super is not put into another:
+    // the phone would start the slot that was not restored, or start one
+    // whose boot and system came from different builds.
+    ensure!(
+        manifest.slot == slot.suffix(),
+        "the backup was made from slot {}, and this recovery runs from slot {}; run the recovery of that slot to restore it",
+        manifest.slot,
+        slot.suffix()
+    );
     let mut items: Vec<&Item> = manifest.items.iter().filter(|i| t.parts[index(i.part)]).collect();
     ensure!(!items.is_empty(), "nothing chosen to restore is in the backup");
     items.sort_by_key(|i| RESTORE_ORDER.iter().position(|&p| p == i.part));

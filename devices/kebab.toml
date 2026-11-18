@@ -3,6 +3,9 @@ codename = "kebab"
 brand = "OnePlus"
 model = "OnePlus 8T"
 ab = true
+# The recovery partition is 100 MiB; the stock image from the LineageOS
+# package fills 96, so its footer has to be put at the partition's end.
+partition_size = 104857600
 soc = { hans = "骁龙865", hant = "驍龍865", en = "Snapdragon 865" }
 
 [display]

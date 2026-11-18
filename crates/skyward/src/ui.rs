@@ -2754,16 +2754,40 @@ impl Pages<'_> {
         self.systems_worker.as_mut().context("this phone holds no second system")
     }
 
-    /// Whether an install may start: none runs, and file transfer has let
-    /// internal storage go, which the page is told otherwise.
+    /// Tell the page that work which writes partitions is under way.
+    fn say_busy(&mut self, now: u64) {
+        self.app.report(
+            self.app.state.lang.pick([
+                "其它写入分区的工作正在进行，请稍后再试",
+                "其它寫入分割區的工作正在進行，請稍後再試",
+                "Other work that writes partitions is under way. Try again shortly.",
+            ]),
+            now,
+        );
+    }
+
+    /// Whether an install may start: nothing else that writes partitions
+    /// runs, and file transfer has let internal storage go, which the page
+    /// is told otherwise.
     fn may_install(&mut self, now: u64) -> Result<bool> {
-        ensure!(self.installer.is_none(), "an installer is running already");
+        if self.installer.is_some() {
+            self.app.report(self.app.state.lang.pick(INSTALL_UNFINISHED), now);
+            return Ok(false);
+        }
+        if self.backuper.is_some() || self.eraser.is_some() || self.part_worker.is_some() || self.merger.is_some() {
+            self.say_busy(now);
+            return Ok(false);
+        }
         withhold(&mut self.transfer, &mut self.app, now)
     }
 
     /// Erase all user data, as the page the system's request showed asks.
     fn reset_asked(&mut self, now: u64) -> Result<()> {
         ensure!(self.eraser.is_none(), "erasing is under way already");
+        if self.backuper.is_some() || self.part_worker.is_some() || self.merger.is_some() {
+            self.say_busy(now);
+            return Ok(());
+        }
         if !withhold(&mut self.transfer, &mut self.app, now)? {
             return Ok(());
         }
@@ -2777,6 +2801,10 @@ impl Pages<'_> {
     /// way.
     fn wipe(&mut self, chosen: Vec<Wipe>, now: u64) -> Result<()> {
         ensure!(self.eraser.is_none(), "erasing is under way already");
+        if self.backuper.is_some() || self.part_worker.is_some() || self.merger.is_some() {
+            self.say_busy(now);
+            return Ok(());
+        }
         if self.decryptor.is_some() {
             self.app.report(self.app.state.lang.pick(DATA_OPENING), now);
             return Ok(());
@@ -2948,6 +2976,10 @@ impl Pages<'_> {
     /// cross, and file transfer lets internal storage go first.
     fn filesystem(&mut self, name: &str, action: FsAction, now: u64) -> Result<()> {
         ensure!(self.eraser.is_none() && self.part_worker.is_none(), "work on partitions is under way already");
+        if self.backuper.is_some() {
+            self.say_busy(now);
+            return Ok(());
+        }
         if name == DATA_PARTITION && self.decryptor.is_some() {
             self.app.report(self.app.state.lang.pick(DATA_OPENING), now);
             return Ok(());
@@ -2977,6 +3009,13 @@ impl Pages<'_> {
         ensure!(self.backuper.is_none(), "a backup or restore is under way already");
         if self.installer.is_some() {
             self.app.report(self.app.state.lang.pick(INSTALL_UNFINISHED), now);
+            return Ok(());
+        }
+        if self.eraser.is_some() || self.part_worker.is_some() || self.merger.is_some() {
+            self.say_busy(now);
+            return Ok(());
+        }
+        if !withhold(&mut self.transfer, &mut self.app, now)? {
             return Ok(());
         }
         let into = backups_in(place);
@@ -3014,6 +3053,13 @@ impl Pages<'_> {
         ensure!(self.backuper.is_none(), "a backup or restore is under way already");
         if self.installer.is_some() {
             self.app.report(self.app.state.lang.pick(INSTALL_UNFINISHED), now);
+            return Ok(());
+        }
+        if self.eraser.is_some() || self.part_worker.is_some() || self.merger.is_some() {
+            self.say_busy(now);
+            return Ok(());
+        }
+        if !withhold(&mut self.transfer, &mut self.app, now)? {
             return Ok(());
         }
         let task = backup::RestoreTask {

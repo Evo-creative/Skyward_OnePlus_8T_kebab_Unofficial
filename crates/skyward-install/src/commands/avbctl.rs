@@ -208,6 +208,15 @@ fn header(file: &mut File, path: &Path, at: u64) -> io::Result<[u8; HEADER_LEN]>
     Ok(header)
 }
 
+/// Whether `slot`'s top-level vbmeta image checks what it boots.
+pub(crate) fn verification_on(by_name: &Path, slot: &str) -> io::Result<bool> {
+    let phone = Phone { by_name, suffix: slot, locked: false };
+    let (path, at) = top_level(&phone)?;
+    let mut file = File::open(&path).map_err(|e| about(&path, e))?;
+    let header = header(&mut file, &path, at)?;
+    Ok(flags(&header) & Check::Verification.off() == 0)
+}
+
 fn flags(header: &[u8; HEADER_LEN]) -> u32 {
     u32::from_be_bytes(header[FLAGS_AT..FLAGS_AT + 4].try_into().expect("four bytes"))
 }

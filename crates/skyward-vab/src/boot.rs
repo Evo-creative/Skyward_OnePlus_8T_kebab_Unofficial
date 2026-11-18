@@ -185,8 +185,7 @@ impl<'a> BootControl<'a> {
                 // The answer is whether it worked, and why not in text it
                 // points at.
                 let why = older(c, FIRST, SET_ACTIVE, |m| m.u32(slot.number()), |r| {
-                    let done = r.pointed()?;
-                    if done.first().is_some_and(|&b| b != 0) {
+                    if r.bool()? {
                         return Ok(None);
                     }
                     let why = r.pointed()?;
