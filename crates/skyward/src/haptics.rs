@@ -203,10 +203,33 @@ impl Led {
         self.write("gain", &format!("{value:#x}"))
     }
 
+    /// Whether the driver still has a clip playing, which its `activate`
+    /// file then ignores: the AW8697's check comes before it reads the value.
+    fn still_playing(&self) -> bool {
+        fs::read_to_string(self.dir.join("rtp_going")).is_ok_and(|s| s.trim() == "1")
+    }
+
+    /// Stop what still plays. The AW8697's `cont` file stops it whatever the
+    /// value is, and resets the chip where it will not come to rest; its
+    /// `activate` file alone cannot, as that returns before it stops.
+    fn stop(&self) -> Result<()> {
+        if self.dir.join("cont").is_file() {
+            self.write("cont", "0")?;
+        }
+        Ok(())
+    }
+
     /// Play one clip of `ms` at `share` of the full strength, as the phone's
     /// own service plays one: the state first, the duration, then the word
     /// that starts it.
     fn play(&self, ms: u32, share: f32) -> Result<()> {
+        // A clip the driver still thinks is playing takes the whole start
+        // for itself, as one left behind when the recovery came out of
+        // fastbootd does; end it first.
+        if self.still_playing() {
+            eprintln!("haptics {}: a clip still plays; stopping it first", self.dir.display());
+            self.stop()?;
+        }
         self.write("state", "1")?;
         self.gain(share)?;
         self.write("duration", &ms.to_string())?;
