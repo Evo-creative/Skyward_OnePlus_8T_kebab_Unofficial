@@ -30,22 +30,6 @@ impl Shell {
     /// Its prompt names the phone, `codename`, and the folder it is in, as
     /// the system's own shell does over adb.
     pub fn start(rows: u16, cols: u16, codename: &str, folder: &Path) -> Result<Shell> {
-        let (mut master, mut slave) = (-1, -1);
-        let size = libc::winsize { ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0 };
-        if unsafe { libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), std::ptr::null(), &size) } != 0 {
-            return Err(io::Error::last_os_error()).context("open a pseudo-terminal");
-        }
-        let (master, slave) = unsafe { (OwnedFd::from_raw_fd(master), OwnedFd::from_raw_fd(slave)) };
-        // Nothing the shell starts is to hold the screen's side open, and
-        // the screen reads it only when there is something to read.
-        let fd = master.as_raw_fd();
-        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-        if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } != 0
-            || flags < 0
-            || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } != 0
-        {
-            return Err(io::Error::last_os_error()).context("set the pseudo-terminal up");
-        }
         let mut command = Command::new(SHELL);
         command
             .current_dir(folder)
@@ -55,7 +39,43 @@ impl Shell {
             .env("PS1", "${HOSTNAME}:${PWD:-?} # ")
             // The socket init made for the recovery service means nothing to
             // what the shell runs.
+            .env_remove("ANDROID_SOCKET_recovery");
+        Self::spawn(rows, cols, command)
+    }
+
+    /// A shell that only shows the recovery's own log, from its last lines
+    /// on as they are written.
+    pub fn start_log(rows: u16, cols: u16) -> Result<Shell> {
+        let mut command = Command::new(SHELL);
+        command
+            .current_dir("/")
+            .env("TERM", "xterm-256color")
+            .env("HOME", "/")
             .env_remove("ANDROID_SOCKET_recovery")
+            .args(["-c", &format!("exec /system/bin/tail -n 200 -f {}", skyward_sys::LOG)]);
+        Self::spawn(rows, cols, command)
+    }
+
+    /// Start `command` on a new pseudo-terminal of `rows` by `cols`, as a
+    /// session of its own with the terminal as its controlling one.
+    fn spawn(rows: u16, cols: u16, mut command: Command) -> Result<Shell> {
+        let (mut master, mut slave) = (-1, -1);
+        let size = libc::winsize { ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0 };
+        if unsafe { libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), std::ptr::null(), &size) } != 0 {
+            return Err(io::Error::last_os_error()).context("open a pseudo-terminal");
+        }
+        let (master, slave) = unsafe { (OwnedFd::from_raw_fd(master), OwnedFd::from_raw_fd(slave)) };
+        // Nothing the command starts is to hold the screen's side open, and
+        // the screen reads it only when there is something to read.
+        let fd = master.as_raw_fd();
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } != 0
+            || flags < 0
+            || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } != 0
+        {
+            return Err(io::Error::last_os_error()).context("set the pseudo-terminal up");
+        }
+        command
             .stdin(Stdio::from(slave.try_clone().context("share the terminal")?))
             .stdout(Stdio::from(slave.try_clone().context("share the terminal")?))
             .stderr(Stdio::from(slave));
@@ -67,7 +87,7 @@ impl Shell {
                 Ok(())
             });
         }
-        let child = command.spawn().with_context(|| format!("start {SHELL}"))?;
+        let child = command.spawn().context("start the shell")?;
         let ended = unsafe { libc::syscall(libc::SYS_pidfd_open, child.id() as libc::pid_t, 0) };
         if ended < 0 {
             return Err(io::Error::last_os_error()).context("watch the shell");

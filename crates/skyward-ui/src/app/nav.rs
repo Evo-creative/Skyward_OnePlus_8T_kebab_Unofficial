@@ -296,6 +296,7 @@ impl App {
                 self.state.layer = Layer::Letters;
                 Vec::new()
             }
+            Screen::RecoveryLog => vec![Effect::StartLog],
             Screen::Terminal => {
                 self.state.layer = Layer::Letters;
                 if self.term.is_none() {

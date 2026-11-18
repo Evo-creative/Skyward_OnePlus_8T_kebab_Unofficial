@@ -28,6 +28,40 @@ impl App {
         self.refresh();
     }
 
+    /// The rows and columns of the log page's screen.
+    pub fn log_size(&self, f: &Fonts) -> (u16, u16) {
+        let t = self.theme();
+        let l = term::log_layout(&t, f, t.m.content_top);
+        (l.rows, l.cols)
+    }
+
+    /// The log page has started reading: a blank screen, without a cursor
+    /// or keys.
+    pub fn log_started(&mut self, rows: u16, cols: u16) {
+        let mut log = Term::new(rows, cols);
+        log.running = false;
+        self.log = Some(log);
+        self.refresh();
+    }
+
+    /// What the recovery's log has written since the last call.
+    pub fn log_output(&mut self, bytes: &[u8]) {
+        let Some(log) = self.log.as_mut() else { return };
+        log.feed(bytes);
+        if self.screen() == Screen::RecoveryLog {
+            self.refresh();
+        }
+    }
+
+    /// Reading the recovery's log ended, as `end` says.
+    pub fn log_ended(&mut self, end: TermEnd) {
+        let (l, Some(log)) = (self.state.lang, self.log.as_mut()) else { return };
+        let how = fmt::term_end(l, &end);
+        log.feed(tr!(l, "\r\n[日志读取结束：{how}]\r\n", "\r\n[記錄讀取結束：{how}]\r\n", "\r\n[the log ended: {how}]\r\n").as_bytes());
+        log.running = false;
+        self.refresh();
+    }
+
     /// What the shell wrote.
     pub fn term_output(&mut self, bytes: &[u8]) {
         let term = self.term.as_mut().expect("only a shell that started writes");
@@ -93,6 +127,11 @@ impl App {
         if self.screen() == Screen::Editor {
             self.state.editor.as_mut().expect("the editor page shows a file").scroll(-rows);
             self.refresh_text();
+        } else if self.screen() == Screen::RecoveryLog {
+            if let Some(log) = self.log.as_mut() {
+                log.scroll(rows);
+                self.refresh();
+            }
         } else if let Some(term) = self.term.as_mut() {
             term.scroll(rows);
             self.refresh();
@@ -104,6 +143,24 @@ impl App {
 mod tests {
     use super::*;
     use crate::app::testing::*;
+
+    #[test]
+    fn the_recovery_log_opens_from_the_home_page_above_advanced_and_has_no_keys() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        let fr = app.frame(&f, &i);
+        let log = fr.hits.iter().find(|h| h.action == Action::Open(Screen::RecoveryLog)).expect("the log row is on the home page").rect;
+        let advanced = fr.hits.iter().find(|h| h.action == Action::Open(Screen::Advanced)).expect("the advanced row").rect;
+        assert!(log.y < advanced.y, "the log is above Advanced");
+        assert_eq!(tap(&mut app, &f, &i, Action::Open(Screen::RecoveryLog)), vec![Effect::StartLog]);
+        assert_eq!(app.screen(), Screen::RecoveryLog);
+        let (rows, cols) = app.log_size(&f);
+        app.log_started(rows, cols);
+        app.log_output(b"skyward: mounted system_a\r\n");
+        let fr = app.frame(&f, &i);
+        assert!(fr.hits.iter().all(|h| !matches!(h.action, Action::Type(_) | Action::TermKey(_))), "no keyboard and no terminal keys");
+        assert_eq!(fr.scrollback.map(|(_, pitch)| pitch > 0.0), Some(true), "the log scrolls back");
+    }
 
     #[test]
     fn the_terminal_sends_every_key_to_its_shell() {

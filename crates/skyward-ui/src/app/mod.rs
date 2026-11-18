@@ -121,6 +121,9 @@ pub enum Screen {
     /// A text file, changed on the screen's keyboard and then saved.
     Editor,
     Terminal,
+    /// What the recovery's own log holds, as a terminal's screen shows it,
+    /// without keys under it.
+    RecoveryLog,
     /// Giving the data partition's files the SELinux labels the installed
     /// system's rules give them: what it does and a swipe to start, then
     /// how far it has come and how it ended.
@@ -530,6 +533,8 @@ pub enum Effect {
     Delete(String),
     /// Stop the work on files under way.
     StopJob,
+    /// Start reading the recovery's log, for the page that shows it.
+    StartLog,
     /// Give the data partition's files the SELinux labels the installed
     /// system's rules give them, telling how it goes with
     /// [`App::relabel_started`], [`App::relabel_progress`] and
@@ -1140,6 +1145,8 @@ pub struct App {
     /// The terminal page's shell, from when it is first opened; it goes on
     /// while other pages show.
     term: Option<Term>,
+    /// What the recovery's log holds, for the page that shows it.
+    log: Option<Term>,
     display_on: bool,
     /// When the screen was last touched or a key pressed; set on the first
     /// tick, so the time before the UI started does not count.
@@ -1241,6 +1248,7 @@ impl App {
             snap: false,
             glow: None,
             term: None,
+            log: None,
             display_on: true,
             active: None,
             woke_at: None,

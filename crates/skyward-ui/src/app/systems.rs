@@ -198,7 +198,7 @@ mod tests {
             let mut app = App::new(Screen::Home, W, H, PPD);
             (app.state.dual_boot, app.state.systems) = (true, Some(Ok(systems)));
             let t = app.theme();
-            let cx = Ctx { t: &t, f: &f, info: &i, state: &app.state, term: None, band: None };
+            let cx = Ctx { t: &t, f: &f, info: &i, state: &app.state, term: None, log: None, band: None };
             pages::render(Screen::Home, &cx).canvas.data.clone()
         };
         assert!(named(two_systems()) != named(Overview { other_starts: true, ..two_systems() }), "the home page names the one that starts");
@@ -233,7 +233,7 @@ mod tests {
         let mut app = App::new(Screen::Systems, W, H, PPD);
         (app.state.dual_boot, app.state.systems) = (true, Some(Ok(systems)));
         let t = app.theme();
-        let cx = Ctx { t: &t, f, info: i, state: &app.state, term: None, band: None };
+        let cx = Ctx { t: &t, f, info: i, state: &app.state, term: None, log: None, band: None };
         pages::render(Screen::Systems, &cx).canvas.data.clone()
     }
 

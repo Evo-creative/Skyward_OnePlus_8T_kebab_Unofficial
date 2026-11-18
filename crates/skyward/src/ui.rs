@@ -1227,6 +1227,8 @@ struct Pages<'a> {
     skyward_updater: Option<updates::Worker>,
     /// The terminal page's shell, from when the page first asks for one.
     shell: Option<pty::Shell>,
+    /// The shell that shows the recovery's own log on its page.
+    log: Option<pty::Shell>,
     /// The USB drive plugged in, looked for each second.
     plugged: Option<Plugged>,
     seen: Option<String>,
@@ -1450,6 +1452,7 @@ impl<'a> Pages<'a> {
             skyward_checker: None,
             skyward_updater: None,
             shell: None,
+            log: None,
             plugged: None,
             seen: None,
             drive_at: Instant::now(),
@@ -1636,6 +1639,7 @@ impl<'a> Pages<'a> {
         self.skyward_told(now)?;
         self.decrypt_told(now)?;
         self.shell_told()?;
+        self.log_told()?;
         self.take_in(drive_told, now)?;
         self.offer_storage(now)
     }
@@ -1794,6 +1798,9 @@ impl<'a> Pages<'a> {
         }
         if let Some(sh) = &self.shell {
             fds.extend(sh.fds());
+        }
+        if let Some(log) = &self.log {
+            fds.extend(log.fds());
         }
         if let Some(w) = &self.worker {
             fds.push(w.fd());
@@ -2453,6 +2460,40 @@ impl Pages<'_> {
         Ok(())
     }
 
+    /// What the recovery's log wrote, and its end.
+    fn log_told(&mut self) -> Result<()> {
+        let Some(log) = &mut self.log else { return Ok(()) };
+        let wrote = log.read()?;
+        if !wrote.is_empty() {
+            self.app.log_output(&wrote);
+        }
+        if let Some(status) = log.ended()? {
+            let last = log.read()?;
+            if !last.is_empty() {
+                self.app.log_output(&last);
+            }
+            self.app.log_ended(pty::how(status));
+            self.log = None;
+        }
+        Ok(())
+    }
+
+    /// Start reading the recovery's own log for the page that shows it.
+    fn start_log(&mut self, now: u64) -> Result<()> {
+        if self.log.is_some() {
+            return Ok(());
+        }
+        let (rows, cols) = self.app.log_size(&self.fonts);
+        match pty::Shell::start_log(rows, cols) {
+            Ok(log) => {
+                self.log = Some(log);
+                self.app.log_started(rows, cols);
+            }
+            Err(e) => self.app.report(&format!("{e:#}"), now),
+        }
+        Ok(())
+    }
+
     /// Internal storage goes to the computer while it is open, and no
     /// erasing or installing could take it away. File transfer that does
     /// not follow, or whose service ended, stops, and the page says why.
@@ -2544,6 +2585,7 @@ impl Pages<'_> {
             Effect::Wipe(chosen) => self.wipe(chosen, now)?,
             Effect::Install => self.installer.as_ref().context("no installer holds an update")?.install(),
             Effect::StartShell(folder) => self.start_shell(&folder, now)?,
+            Effect::StartLog => self.start_log(now)?,
             // A shell that will not take keys is the page's to report; the
             // recovery carries on.
             Effect::TermInput(bytes) => {

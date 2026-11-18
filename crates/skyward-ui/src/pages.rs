@@ -47,6 +47,8 @@ pub struct Ctx<'a> {
     pub state: &'a State,
     /// The shell the terminal page shows, once one has started.
     pub term: Option<&'a Term>,
+    /// The recovery's log, once the page that shows it has started reading.
+    pub log: Option<&'a Term>,
     /// The part of the page to draw; all of it if none is given. The page
     /// is laid out whole either way.
     pub band: Option<Band>,
@@ -85,6 +87,7 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::Permissions => permissions(cx),
         Screen::Editor => editor(cx),
         Screen::Terminal => terminal(cx),
+        Screen::RecoveryLog => recovery_log(cx),
         Screen::Relabel => relabel(cx),
         Screen::Filesystems => filesystems(cx),
         Screen::Filesystem => filesystem(cx),
@@ -161,6 +164,9 @@ const REBOOT_TARGETS: [(Text, Option<Text>); 6] = [
 const WLAN: Text = ["WLAN", "Wi-Fi", "Wi-Fi"];
 const DECRYPT: Text = ["解密", "解密", "Decrypt"];
 const ADVANCED: Text = ["高级", "進階", "Advanced"];
+
+/// The recovery's own log, as the page that shows it names it.
+const RECOVERY_LOG: Text = ["Recovery 日志", "Recovery 記錄", "Recovery log"];
 const SETTINGS: Text = ["设置", "設定", "Settings"];
 const REBOOT: Text = ["重启", "重新啟動", "Reboot"];
 const ABOUT: Text = ["关于本机", "關於手機", "About phone"];
@@ -304,12 +310,14 @@ pub fn home(cx: &Ctx) -> Frame {
     let target = l.pick(REBOOT_TARGETS[cx.state.reboot].0);
     let system = widgets::list(&mut c, t, f, y, &[
         Row::new(l.pick(["清除数据", "清除資料", "Wipe data"])).icon(RED, Icon::Wipe),
+        Row::new(l.pick(RECOVERY_LOG)).icon(ORANGE, Icon::Log),
         Row::new(l.pick(ADVANCED)).icon(SLATE, Icon::More),
         Row::new(l.pick(SETTINGS)).icon(SLATE, Icon::Gear),
         Row::new(l.pick(REBOOT)).icon(ORANGE, Icon::Power).trail(Trail::Value(target)),
     ]);
     out.extend(hits(&system.rows, &[
         Action::Open(Screen::Wipe),
+        Action::Open(Screen::RecoveryLog),
         Action::Open(Screen::Advanced),
         Action::Open(Screen::Settings),
         Action::Open(Screen::Reboot),
@@ -3487,6 +3495,17 @@ pub fn file_job(cx: &Ctx) -> Frame {
 
 /// A shell on a terminal: the screen it writes, the keys a phone keyboard
 /// lacks, and the keyboard, every key of which goes to the shell.
+/// The recovery's own log, on a terminal's screen without keys: what the
+/// pages and the work they started wrote, newest at the bottom.
+pub fn recovery_log(cx: &Ctx) -> Frame {
+    let (t, f) = (cx.t, cx.f);
+    let mut c = page(cx);
+    let top = t.m.content_top;
+    let l = term::log_layout(t, f, top);
+    term::draw(&mut c, t, f, &l, cx.log);
+    Frame { scrollback: Some((l.card, l.pitch)), ..Frame::new(t, c, Vec::new(), cx.state.lang.pick(RECOVERY_LOG), top) }
+}
+
 pub fn terminal(cx: &Ctx) -> Frame {
     let (t, f, s) = (cx.t, cx.f, cx.state);
     let mut c = page(cx);
