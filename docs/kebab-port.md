@@ -757,6 +757,36 @@ kebab 没有 `init_boot`，kernel 与 ramdisk 同在一个 v2 boot 镜像中。�
 - 给打包器加签名能力（用测试密钥对 vbmeta 签名），使镜像在验证开启时也能被解析；
 - 或让打包器同时产出「禁用校验」的 vbmeta，并写进安装说明。
 
+### 8.7 未实测功能的代码审查（2026-11-18）
+
+备份/恢复、擦除/格式化、刷写/OTA/AVB/自更新从未在 kebab 上执行过，只做了代码审查。
+本轮已修（`4e34fda`）：
+
+- 工厂重置收到 `--reformat_data` 时，不再把 `/metadata`、`/cache` 也按 data 的文件系统格式化
+- 多槽刷写改为**写完一个槽再写下一个**，掉电不再可能同时写坏 A/B
+- 有独立 recovery 分区时，带内核的 recovery 镜像不再提供写入 `boot`
+- 恢复拒绝“从另一个槽做的备份”，避免 boot/super 混用
+- 同一秒的备份不再覆盖已有备份；manifest 的分区名/文件名拒绝 `../`、绝对路径
+- 恢复拒绝穿过归档创建的符号链接，硬链接必须在备份目录内
+- 安装、备份/恢复、擦除、分区操作互斥，并先收回 MTP
+- 脚本安装先检查合并状态，正在合并时拒绝，避免 detach 拆掉 snapshot
+- OTA 后“保留 Skyward”会检查目标槽的 vbmeta；验证开启时不再写未签名 recovery
+- HIDL boot control 的返回值按 `bool + string` 读
+- `[device] partition_size`：kebab 为 100 MiB，发布构建不带 `--size` 也能把 footer 放到分区末尾
+- 脚本的 `/tmp/update-binary` 用完即删
+
+仍需决定/未修：
+
+1. **payload OTA 不验签**：“验证 zip 签名”只作用于安装脚本；`update_engine_sideload` 没有公钥，payload 的 pre-device 由 zip 自己声明。
+2. **OTA 后保留的 Skyward 仍是旧内核**：只按 codename 检查，没有比对 OTA 的构建/内核；即使 vbmeta 允许，也可能起不来显示、存储或按键。
+3. **「Flash Skyward again」**会写正在运行的 recovery（甚至两个槽），无备份/回滚；kebab 没有 Wi-Fi，当前入口也不会显示。
+4. **手动刷 `vbmeta`/`recovery` 不检查验证状态**：刷入启用验证的 vbmeta 会让未签名 recovery 无法启动。
+5. **avbctl 改 flags 会破坏 vbmeta 签名**；`enable-verification` 实际无法恢复一个可验证的镜像。
+6. 恢复备份后没有 `mark_unbootable`；写入中断仍可能留下半套 boot set。
+7. A/B “清除分区”包路径（`partwork::disable`）没有先卸载分区、收回 data。
+8. 压缩备份跳过剩余空间检查；`Boot` 备份包含 `recovery`，恢复会覆盖当前 Skyward。
+9. 安装脚本/OTA 期间没有卸载 `/data`、`/cache`、`/sdcard`。
+
 ## 9. 下一步
 
 > 2026-11-18 状态：`/data` 解密、卸载与重新解密、振动、MTP 均可用；Wi-Fi 已搁置。
