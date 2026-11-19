@@ -6,6 +6,8 @@ English | [简体中文](README.zh-CN.md)
 
 ## Building for the OnePlus 8T (kebab)
 
+### Skyward-kebab does not support dual boot or networking!!!
+
 This fork builds Skyward for the OnePlus 8T (kebab), on the recovery the phone
 already has. What was tried and what broke is in
 [docs/kebab-port.md](docs/kebab-port.md).
