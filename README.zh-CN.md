@@ -4,13 +4,7 @@
 
 [English](README.md) | 简体中文
 
-Skyward 是使用 Rust 编写的 recovery，从零开始编写。
-
-<p align="center">
-  <img src="assets/home.png" width="30%" alt="首页">
-  <img src="assets/settings-dark.png" width="30%" alt="深色模式下的设置">
-  <img src="assets/time-zone.png" width="30%" alt="时区">
-</p>
+> **AI 使用声明：** 本分支的代码、审查和文档整理使用了 AI 辅助。
 
 ## 为 OnePlus 8T（kebab）构建
 
@@ -24,6 +18,8 @@ Skyward 是使用 Rust 编写的 recovery，从零开始编写。
 | 未证实 | 备份/恢复、刷镜像、zip 与 payload、擦除/格式化/工厂重置、AVB、「Flash Skyward again」 |
 | 未实现 | Wi-Fi（supplicant 的 vendor AIDL 服务注册不上）、振动波形 |
 | 实现不了 | 双系统（没有 `init_boot`） |
+
+> 未证实功能都有合理的代码实现，且已使用AI检查。
 
 ### 刷入
 
@@ -64,6 +60,14 @@ target/release/skyward-pack recovery --stock cache/recovery.img \
 
 虽然 kebab 装不了第二系统，打包器仍需要 system-init，所以照常构建。
 
+
+Skyward 是使用 Rust 编写的 recovery，从零开始编写。
+
+<p align="center">
+  <img src="assets/home.png" width="30%" alt="首页">
+  <img src="assets/settings-dark.png" width="30%" alt="深色模式下的设置">
+  <img src="assets/time-zone.png" width="30%" alt="时区">
+</p>
 
 ## 功能
 

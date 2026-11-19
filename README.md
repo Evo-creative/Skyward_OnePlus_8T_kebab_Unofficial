@@ -4,13 +4,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-Skyward is a recovery written in Rust, from scratch.
-
-<p align="center">
-  <img src="assets/home.png" width="30%" alt="Home">
-  <img src="assets/settings-dark.png" width="30%" alt="Settings in dark mode">
-  <img src="assets/time-zone.png" width="30%" alt="Time zone">
-</p>
+> **AI usage:** code, review and documentation in this fork were produced with AI assistance.
 
 ## Building for the OnePlus 8T (kebab)
 
@@ -30,6 +24,8 @@ Wi-Fi, Skyward's online update and dual boot.
 | Built, not verified | backup/restore, images, zips and payload OTAs, erase/format/factory reset, AVB, "Flash Skyward again" |
 | Not implemented | Wi-Fi (the supplicant's vendor AIDL service will not register), vibration waveforms |
 | Not possible | dual boot (no `init_boot`) |
+
+> Unverified features have reasonable code implementations and have been reviewed with AI.
 
 ### Flashing
 
@@ -75,6 +71,14 @@ target/release/skyward-pack recovery --stock cache/recovery.img \
 The system-init program is built although kebab cannot hold a second system,
 because the packer takes it.
 
+
+Skyward is a recovery written in Rust, from scratch.
+
+<p align="center">
+  <img src="assets/home.png" width="30%" alt="Home">
+  <img src="assets/settings-dark.png" width="30%" alt="Settings in dark mode">
+  <img src="assets/time-zone.png" width="30%" alt="Time zone">
+</p>
 
 ## Features
 
