@@ -1,5 +1,3 @@
-![Skyward Recovery](assets/hero.jpg)
-
 # Skyward
 
 [English](README.md) | 简体中文
@@ -60,6 +58,8 @@ target/release/skyward-pack recovery --stock cache/recovery.img \
 
 虽然 kebab 装不了第二系统，打包器仍需要 system-init，所以照常构建。
 
+
+![Skyward Recovery](assets/hero.jpg)
 
 Skyward 是使用 Rust 编写的 recovery，从零开始编写。
 

@@ -1,5 +1,3 @@
-![Skyward Recovery](assets/hero.jpg)
-
 # Skyward
 
 English | [简体中文](README.zh-CN.md)
@@ -71,6 +69,8 @@ target/release/skyward-pack recovery --stock cache/recovery.img \
 The system-init program is built although kebab cannot hold a second system,
 because the packer takes it.
 
+
+![Skyward Recovery](assets/hero.jpg)
 
 Skyward is a recovery written in Rust, from scratch.
 
